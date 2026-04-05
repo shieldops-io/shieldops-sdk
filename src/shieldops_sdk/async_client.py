@@ -36,7 +36,7 @@ class AsyncShieldOpsClient:
         token: str | None = None,
         timeout: float = _DEFAULT_TIMEOUT,
     ) -> None:
-        headers: dict[str, str] = {"User-Agent": "shieldops-sdk/0.1.0"}
+        headers: dict[str, str] = {"User-Agent": "shieldops-sdk/1.0.0"}
         if api_key:
             headers["X-API-Key"] = api_key
         elif token:

@@ -37,7 +37,7 @@ class TestClientInit:
     def test_client_init_defaults(self) -> None:
         client = ShieldOpsClient()
         assert str(client._http.base_url) == f"{BASE}/"
-        assert client._http.headers["User-Agent"] == "shieldops-sdk/0.1.0"
+        assert client._http.headers["User-Agent"] == "shieldops-sdk/1.0.0"
         client.close()
 
     def test_client_context_manager(self) -> None:

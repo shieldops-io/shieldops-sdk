@@ -54,3 +54,32 @@ class ServerError(ShieldOpsError):
         status_code: int = 500,
     ) -> None:
         super().__init__(message, status_code=status_code)
+
+
+class ShieldOpsDeniedError(ShieldOpsError):
+    """Raised in enforce mode when a tool call is denied by policy.
+
+    Attributes:
+        tool_name: The tool that was denied.
+        reasons: List of policy violation reasons.
+        risk_score: The computed risk score for the tool call.
+    """
+
+    def __init__(
+        self,
+        tool_name: str = "",
+        reasons: list[str] | None = None,
+        risk_score: float = 0.0,
+    ) -> None:
+        self.tool_name = tool_name
+        self.reasons = reasons or []
+        self.risk_score = risk_score
+        detail = f"Tool '{tool_name}' denied: {', '.join(self.reasons)}"
+        super().__init__(detail, status_code=403)
+
+
+class ShieldOpsConnectionError(ShieldOpsError):
+    """Raised when the SDK cannot reach the ShieldOps API."""
+
+    def __init__(self, message: str = "Failed to connect to ShieldOps API") -> None:
+        super().__init__(message, status_code=None)

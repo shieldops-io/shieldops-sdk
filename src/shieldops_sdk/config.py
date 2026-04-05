@@ -1,0 +1,56 @@
+"""ShieldOps SDK configuration — loaded from constructor args or environment variables."""
+
+from __future__ import annotations
+
+import os
+from enum import Enum
+
+from pydantic import BaseModel, Field
+
+
+class SDKMode(str, Enum):
+    """SDK enforcement mode."""
+
+    AUDIT = "audit"
+    ENFORCE = "enforce"
+
+
+class ShieldOpsConfig(BaseModel):
+    """Configuration for the ShieldOps SDK.
+
+    Values can be provided directly or read from environment variables:
+    - ``SHIELDOPS_API_KEY``
+    - ``SHIELDOPS_ENDPOINT``
+    - ``SHIELDOPS_MODE``
+
+    Attributes:
+        api_key: ShieldOps API key for authentication.
+        endpoint: ShieldOps API base URL.
+        mode: Operating mode -- ``audit`` logs without blocking, ``enforce`` blocks risky calls.
+        timeout: HTTP request timeout in seconds.
+    """
+
+    api_key: str = Field(default="")
+    endpoint: str = Field(default="https://api.shieldops.io")
+    mode: SDKMode = SDKMode.AUDIT
+    timeout: float = Field(default=5.0, ge=0.1)
+
+    def model_post_init(self, __context: object) -> None:
+        """Populate unset fields from environment variables."""
+        if not self.api_key:
+            self.api_key = os.environ.get("SHIELDOPS_API_KEY", "")
+        if self.endpoint == "https://api.shieldops.io":
+            env_endpoint = os.environ.get("SHIELDOPS_ENDPOINT", "")
+            if env_endpoint:
+                self.endpoint = env_endpoint
+        env_mode = os.environ.get("SHIELDOPS_MODE", "")
+        if env_mode and env_mode.lower() in ("audit", "enforce"):
+            self.mode = SDKMode(env_mode.lower())
+
+    @property
+    def is_enforce(self) -> bool:
+        return self.mode == SDKMode.ENFORCE
+
+    @property
+    def is_audit(self) -> bool:
+        return self.mode == SDKMode.AUDIT
