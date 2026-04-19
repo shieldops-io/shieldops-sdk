@@ -1,0 +1,22 @@
+# CODEOWNERS for shieldops-sdk
+#
+# Every path in this repository is owned by at least one reviewer listed
+# below. Pull requests automatically request review from the matching
+# owner. Order matters: the last matching pattern wins for a given path.
+#
+# TODO: replace @ghantakiran with team handles (e.g. @shieldops/maintainers,
+# @shieldops/security) after the GitHub organization is provisioned and
+# the maintainers/security teams exist. See HITL-SETUP.md.
+
+* @ghantakiran
+
+# Security-sensitive paths require a security reviewer in addition to
+# the default owner. After org setup, add @shieldops/security here.
+/SECURITY.md            @ghantakiran
+/.github/               @ghantakiran
+/src/shieldops_sdk/     @ghantakiran
+
+# Release + license docs require a maintainer review.
+/LICENSE                @ghantakiran
+/CHANGELOG.md           @ghantakiran
+/pyproject.toml         @ghantakiran

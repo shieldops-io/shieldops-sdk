@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability report
+    url: https://github.com/shieldops/shieldops-sdk/blob/main/SECURITY.md
+    about: Do not report security issues in public GitHub issues. See SECURITY.md for the private disclosure process and our response SLAs.
+  - name: Usage questions and discussions
+    url: https://github.com/shieldops/shieldops-sdk/discussions
+    about: For general questions about using shieldops-sdk, open a discussion instead of an issue.
