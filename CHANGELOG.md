@@ -19,6 +19,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [1.1.0] - 2026-04-20
+
+### Removed
+
+- **BREAKING**: Deleted framework adapter deprecation shims introduced in
+  RFC #434 PR-2/3/4 — the deprecation window has elapsed. The following
+  top-level modules are gone; importing them now raises
+  `ModuleNotFoundError`:
+  - `shieldops.sdk.langchain` → use `shieldops.sdk.adapters.langchain`
+  - `shieldops.sdk.crewai` → use `shieldops.sdk.adapters.crewai`
+  - `shieldops.sdk.llamaindex` → use `shieldops.sdk.adapters.llamaindex`
+
+  Closes RFC #434 PR-6.
+
 ## [1.0.0] - 2026-07-14
 
 v1.0 GA. Framework integrations for LangChain, CrewAI, LlamaIndex. Bundle
