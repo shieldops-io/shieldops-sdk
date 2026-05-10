@@ -11,30 +11,14 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, Field
 
+from shieldops_sdk._policy import (
+    effective_blocked_patterns,
+    effective_high_risk_patterns,
+)
 from shieldops_sdk.config import ShieldOpsConfig
 from shieldops_sdk.exceptions import ShieldOpsDeniedError
 
 logger = logging.getLogger("shieldops_sdk")
-
-# Local policy cache -- commonly dangerous operations
-_DEFAULT_BLOCKED_PATTERNS: set[str] = {
-    "delete_database",
-    "drop_table",
-    "modify_iam_root",
-    "rm_rf",
-    "format_disk",
-    "disable_firewall",
-    "delete_backup",
-}
-
-_HIGH_RISK_PATTERNS: set[str] = {
-    "execute_command",
-    "run_shell",
-    "modify_security_group",
-    "change_iam_policy",
-    "create_user",
-    "rotate_credentials",
-}
 
 
 class ToolCall(BaseModel):
@@ -76,8 +60,8 @@ class ShieldOpsInterceptor:
 
     def __init__(self, config: ShieldOpsConfig) -> None:
         self._config = config
-        self._blocked_tools: set[str] = set(_DEFAULT_BLOCKED_PATTERNS)
-        self._high_risk_tools: set[str] = set(_HIGH_RISK_PATTERNS)
+        self._blocked_tools: set[str] = effective_blocked_patterns(config)
+        self._high_risk_tools: set[str] = effective_high_risk_patterns(config)
         self._call_count: int = 0
         self._deny_count: int = 0
 

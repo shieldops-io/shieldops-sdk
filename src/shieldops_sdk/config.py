@@ -34,6 +34,21 @@ class ShieldOpsConfig(BaseModel):
     endpoint: str = Field(default="https://api.shieldops.io")
     mode: SDKMode = SDKMode.AUDIT
     timeout: float = Field(default=5.0, ge=0.1)
+    extra_blocked_patterns: set[str] = Field(
+        default_factory=set,
+        description=(
+            "Additional tool-name patterns to deny on top of the SDK defaults. "
+            "Merged with shieldops_sdk._policy defaults at interceptor construction."
+        ),
+    )
+    extra_high_risk_patterns: set[str] = Field(
+        default_factory=set,
+        description=(
+            "Additional tool-name patterns to flag as high-risk on top of the "
+            "SDK defaults. Merged with shieldops_sdk._policy defaults at "
+            "interceptor construction."
+        ),
+    )
 
     def model_post_init(self, __context: object) -> None:
         """Populate unset fields from environment variables."""
