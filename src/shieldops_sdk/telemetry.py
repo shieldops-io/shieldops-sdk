@@ -83,7 +83,11 @@ class ShieldOpsTelemetry:
                 exporter = OTLPSpanExporter(endpoint=otel_endpoint)
                 provider.add_span_processor(BatchSpanProcessor(exporter))
                 trace.set_tracer_provider(provider)
-                self._otel_tracer = trace.get_tracer("shieldops.agent.firewall", "1.0.0")
+                # Single source of truth — keep aligned with __version__ via the
+                # test_version_coherence fence in test_packaging.py.
+                from shieldops_sdk import __version__ as _sdk_version
+
+                self._otel_tracer = trace.get_tracer("shieldops.agent.firewall", _sdk_version)
                 logger.info("shieldops.telemetry.otel_initialized endpoint=%s", otel_endpoint)
             except Exception as exc:
                 logger.warning("shieldops.telemetry.otel_init_failed error=%s", str(exc))

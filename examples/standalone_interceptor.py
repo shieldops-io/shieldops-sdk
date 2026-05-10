@@ -12,8 +12,6 @@ Usage:
 
 from __future__ import annotations
 
-import os
-
 # ---------------------------------------------------------------------------
 # 1. Import the interceptor and config
 # ---------------------------------------------------------------------------
@@ -31,10 +29,9 @@ def demo_audit_mode() -> None:
     print("=" * 60)
 
     # Create config in audit mode (the default)
-    config = ShieldOpsConfig(
-        api_key=os.environ.get("SHIELDOPS_API_KEY", "sk-demo"),
-        mode=SDKMode.AUDIT,
-    )
+    # Local-first: no api_key, no network. Block decisions evaluate against
+    # the in-process policy catalogue.
+    config = ShieldOpsConfig(mode=SDKMode.AUDIT)
     interceptor = ShieldOpsInterceptor(config)
 
     # Check a safe tool -- low risk, allowed
@@ -64,10 +61,7 @@ def demo_enforce_mode() -> None:
     print("ENFORCE MODE -- blocks tool calls that match dangerous patterns")
     print("=" * 60)
 
-    config = ShieldOpsConfig(
-        api_key=os.environ.get("SHIELDOPS_API_KEY", "sk-demo"),
-        mode=SDKMode.ENFORCE,
-    )
+    config = ShieldOpsConfig(mode=SDKMode.ENFORCE)
     interceptor = ShieldOpsInterceptor(config)
 
     # Safe tool -- passes through
@@ -103,10 +97,13 @@ def demo_custom_agent() -> None:
     print("CUSTOM AGENT LOOP -- integrate into any Python workflow")
     print("=" * 60)
 
-    config = ShieldOpsConfig(
-        api_key=os.environ.get("SHIELDOPS_API_KEY", "sk-demo"),
-        mode=SDKMode.ENFORCE,
-    )
+    # For connected mode, opt in explicitly:
+    #     config = ShieldOpsConfig(
+    #         api_key="sk-...",
+    #         mode=SDKMode.ENFORCE,
+    #         telemetry=SDKTelemetry.REMOTE,
+    #     )
+    config = ShieldOpsConfig(mode=SDKMode.ENFORCE)
     interceptor = ShieldOpsInterceptor(config)
 
     # Simulate a sequence of tool calls from an AI agent

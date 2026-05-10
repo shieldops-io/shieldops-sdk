@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "shieldops-sdk"
-version = "1.1.0"
+version = "0.1.0"
 description = "AI Security Control Plane SDK — intercept and govern AI agent tool calls"
 readme = "README.md"
 license = "Apache-2.0"
@@ -14,7 +14,7 @@ authors = [
 ]
 keywords = ["ai", "security", "agent", "firewall", "governance", "llm", "mcp", "langchain", "crewai"]
 classifiers = [
-    "Development Status :: 5 - Production/Stable",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
@@ -50,10 +50,14 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://shieldops.io"
-Documentation = "https://docs.shieldops.io/sdk"
-Repository = "https://github.com/shieldops/shieldops-sdk"
-Changelog = "https://github.com/shieldops/shieldops-sdk/blob/main/CHANGELOG.md"
+# NOTE: shieldops-io/shieldops-sdk is the target public repo. Until the
+# public carve lands (Phase 5+), these URLs may not resolve. Update them in
+# lockstep with the actual public repo creation.
+Homepage = "https://github.com/shieldops-io/shieldops-sdk"
+Documentation = "https://github.com/shieldops-io/shieldops-sdk#readme"
+Repository = "https://github.com/shieldops-io/shieldops-sdk"
+Issues = "https://github.com/shieldops-io/shieldops-sdk/issues"
+Changelog = "https://github.com/shieldops-io/shieldops-sdk/blob/main/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/shieldops_sdk"]
