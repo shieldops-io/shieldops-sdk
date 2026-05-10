@@ -7,9 +7,10 @@ import time
 import uuid
 from typing import Any
 
+import httpx
 from pydantic import BaseModel, Field
 
-from shieldops_sdk.config import ShieldOpsConfig
+from shieldops_sdk.config import SDKTelemetry, ShieldOpsConfig
 
 logger = logging.getLogger("shieldops_sdk")
 
@@ -141,10 +142,41 @@ class ShieldOpsTelemetry:
         return span
 
     def flush(self) -> int:
-        """Export batched spans. Returns the number of spans exported."""
+        """Export batched spans according to the configured telemetry destination.
+
+        Routing matrix (see test_telemetry_modes.py for the contract):
+
+        - ``LOCAL`` or empty ``api_key``: clean no-op, just drains the batch
+          counter. No network attempt.
+        - ``REMOTE`` and ``api_key`` set: POST batched spans to
+          ``{endpoint}/api/v1/firewall/spans``. Network errors are logged
+          and swallowed (best-effort delivery).
+        - ``OTLP``: spans were already pushed to the OTLP tracer at
+          ``record_span()`` time; this just drains the batch counter.
+
+        Returns the number of spans drained from the batch.
+        """
         count = len(self._batch)
         if count == 0:
             return 0
+
+        if self._config.telemetry == SDKTelemetry.REMOTE and self._config.api_key:
+            try:
+                with httpx.Client(timeout=self._config.timeout) as client:
+                    client.post(
+                        f"{self._config.endpoint}/api/v1/firewall/spans",
+                        json={"spans": [s.model_dump() for s in self._batch]},
+                        headers={
+                            "Authorization": f"Bearer {self._config.api_key}",
+                            "Content-Type": "application/json",
+                        },
+                    )
+            except (httpx.HTTPError, httpx.TimeoutException) as exc:
+                logger.warning(
+                    "shieldops.telemetry.remote_flush_error error=%s",
+                    str(exc),
+                )
+
         self._exported_count += count
         self._batch.clear()
         return count

@@ -15,7 +15,7 @@ from shieldops_sdk._policy import (
     effective_blocked_patterns,
     effective_high_risk_patterns,
 )
-from shieldops_sdk.config import ShieldOpsConfig
+from shieldops_sdk.config import SDKTelemetry, ShieldOpsConfig
 from shieldops_sdk.exceptions import ShieldOpsDeniedError
 
 logger = logging.getLogger("shieldops_sdk")
@@ -153,7 +153,10 @@ class ShieldOpsInterceptor:
         """
         tool_call = ToolCall(tool_name=tool_name, args=args or {}, agent_id=agent_id)
 
-        if not self._config.api_key:
+        # Network POST requires BOTH telemetry=REMOTE and an api_key.
+        # Otherwise we evaluate locally — block decision is independent of
+        # telemetry routing (see PR-C contract in test_telemetry_modes.py).
+        if self._config.telemetry != SDKTelemetry.REMOTE or not self._config.api_key:
             return self.check(tool_name, args, agent_id=agent_id)
 
         try:

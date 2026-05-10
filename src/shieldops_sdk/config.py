@@ -15,6 +15,22 @@ class SDKMode(str, Enum):
     ENFORCE = "enforce"
 
 
+class SDKTelemetry(str, Enum):
+    """SDK telemetry destination.
+
+    Separate from :class:`SDKMode` — mode controls block-vs-audit on policy
+    violations; telemetry controls *where* records of those decisions go.
+
+    - ``LOCAL``: keep all events in-process, no network at all.
+    - ``REMOTE``: send to the ShieldOps backend (requires ``api_key``).
+    - ``OTLP``: send to the user's OpenTelemetry collector.
+    """
+
+    LOCAL = "local"
+    REMOTE = "remote"
+    OTLP = "otlp"
+
+
 class ShieldOpsConfig(BaseModel):
     """Configuration for the ShieldOps SDK.
 
@@ -33,6 +49,14 @@ class ShieldOpsConfig(BaseModel):
     api_key: str = Field(default="")
     endpoint: str = Field(default="https://api.shieldops.io")
     mode: SDKMode = SDKMode.AUDIT
+    telemetry: SDKTelemetry = Field(
+        default=SDKTelemetry.LOCAL,
+        description=(
+            "Where intercept records are sent. LOCAL = in-process only "
+            "(default, no network). REMOTE = POST to ShieldOps backend "
+            "(requires api_key). OTLP = export via OpenTelemetry collector."
+        ),
+    )
     timeout: float = Field(default=5.0, ge=0.1)
     extra_blocked_patterns: set[str] = Field(
         default_factory=set,
