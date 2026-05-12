@@ -1,0 +1,36 @@
+# Normalize line endings on commit; check out with platform-native endings.
+* text=auto eol=lf
+
+# Source / docs / config — always LF, always text.
+*.py    text eol=lf
+*.pyi   text eol=lf
+*.md    text eol=lf
+*.rst   text eol=lf
+*.txt   text eol=lf
+*.toml  text eol=lf
+*.yaml  text eol=lf
+*.yml   text eol=lf
+*.json  text eol=lf
+*.cfg   text eol=lf
+*.ini   text eol=lf
+
+# Shell scripts must stay LF even on Windows clones.
+*.sh    text eol=lf
+Makefile text eol=lf
+
+# Common binaries — never normalize.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.pdf   binary
+*.zip   binary
+*.gz    binary
+*.tar   binary
+*.whl   binary
+
+# Linguist hints for GitHub's language stats.
+docs/**           linguist-documentation
+examples/**       linguist-documentation
+tests/**          linguist-detectable=false
