@@ -100,16 +100,22 @@ jobs:
     name: test
     needs: prepare
     runs-on: ubuntu-latest
+    # Sigstore staging round-trip (tests/integration/sigstore/) needs the
+    # workflow's OIDC token to sign against fulcio.sigstage.dev.
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - name: Install dev deps
+      - name: Install dev deps + sigstore (for staging round-trip)
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
-      - name: Pytest
+          pip install "sigstore>=3.0"
+      - name: Pytest (unit + sigstore staging)
         run: pytest tests/ -v --tb=short
 
   # ── 4. build ─────────────────────────────────────────────────────────
