@@ -1,0 +1,226 @@
+# PRD-028 8-job release pipeline for `shieldops-sdk`.
+#
+# Authored in the private monorepo at sdk/.github/workflows/release.yml;
+# rides the carve-out mirror to shieldops-io/shieldops-sdk on every
+# release (PR D rehearsal lesson). This is the ONLY workflow that exists
+# across both repos per Option B.
+#
+# Triggers:
+#   sdk-vX.Y.Z       → production: publishes to pypi.org
+#   sdk-vX.Y.Z-rcN   → rehearsal:  publishes to test.pypi.org
+#
+# Manual approval (production only): the `pypi` environment requires
+# @ghantakiran sign-off on the first 5 releases (PRD-028 §Phase 7).
+#
+# See docs/internal/SDK_RELEASE_YML_OUTLINE.md (private monorepo) for the
+# design notes and the source-of-truth list of jobs + secrets.
+
+name: release
+
+on:
+  push:
+    tags:
+      - "sdk-v[0-9]+.[0-9]+.[0-9]+"
+      - "sdk-v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  # ── 1. prepare ───────────────────────────────────────────────────────
+  prepare:
+    name: prepare (resolve version + validate CHANGELOG)
+    runs-on: ubuntu-latest
+    outputs:
+      sdk_version: ${{ steps.resolve.outputs.sdk_version }}
+      is_rc: ${{ steps.resolve.outputs.is_rc }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Resolve SDK_VERSION from tag
+        id: resolve
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          # Strip "sdk-v" prefix, leaving X.Y.Z[-rcN].
+          VER="${TAG#sdk-v}"
+          IS_RC="false"
+          if [[ "${VER}" == *"-rc"* ]]; then
+            IS_RC="true"
+          fi
+          echo "sdk_version=${VER}" >> "${GITHUB_OUTPUT}"
+          echo "is_rc=${IS_RC}" >> "${GITHUB_OUTPUT}"
+          echo "Resolved: ${VER} (rc=${IS_RC})"
+
+      - name: Validate CHANGELOG has a dated section for this version
+        if: steps.resolve.outputs.is_rc == 'false'
+        run: |
+          VER="${{ steps.resolve.outputs.sdk_version }}"
+          python3 - <<PY
+          import re, sys, pathlib
+          body = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
+          pat = re.compile(rf"^## \[{re.escape('${VER}')}\]\s+-\s+\d{{4}}-\d{{2}}-\d{{2}}", re.M)
+          if not pat.search(body):
+              print(f"CHANGELOG.md missing dated section for [${VER}]", file=sys.stderr)
+              sys.exit(1)
+          print(f"CHANGELOG OK for [${VER}]")
+          PY
+
+  # ── 2. lint-and-type ────────────────────────────────────────────────
+  lint-and-type:
+    name: lint + type
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install dev deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Ruff check
+        run: ruff check src/ tests/
+      - name: Ruff format check
+        run: ruff format --check src/ tests/
+      - name: Mypy
+        run: mypy src/shieldops_sdk/
+
+  # ── 3. test ──────────────────────────────────────────────────────────
+  test:
+    name: test
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install dev deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Pytest
+        run: pytest tests/ -v --tb=short
+
+  # ── 4. build ─────────────────────────────────────────────────────────
+  build:
+    name: build (sdist + wheel)
+    needs: [lint-and-type, test]
+    runs-on: ubuntu-latest
+    outputs:
+      sdist_sha256: ${{ steps.digest.outputs.sdist_sha256 }}
+      wheel_sha256: ${{ steps.digest.outputs.wheel_sha256 }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install build tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install hatch
+      - name: Build distributions
+        run: hatch build -t sdist -t wheel
+      - name: Capture artifact digests
+        id: digest
+        run: |
+          SDIST=$(ls dist/*.tar.gz)
+          WHEEL=$(ls dist/*.whl)
+          echo "sdist_sha256=$(sha256sum ${SDIST} | cut -d' ' -f1)" >> "${GITHUB_OUTPUT}"
+          echo "wheel_sha256=$(sha256sum ${WHEEL} | cut -d' ' -f1)" >> "${GITHUB_OUTPUT}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+
+  # ── 5. sbom ──────────────────────────────────────────────────────────
+  sbom:
+    name: CycloneDX SBOM
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install cyclonedx-py
+        run: pip install cyclonedx-bom
+      - name: Generate SBOM
+        run: |
+          cyclonedx-py environment --of JSON --output-file sbom.cdx.json
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sbom
+          path: sbom.cdx.json
+
+  # ── 6. provenance (SLSA L3 via reusable workflow) ────────────────────
+  provenance:
+    name: SLSA L3 provenance
+    needs: build
+    permissions:
+      id-token: write
+      contents: write
+      actions: read
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.0.0
+    with:
+      base64-subjects: ${{ needs.build.outputs.sdist_sha256 }} ${{ needs.build.outputs.wheel_sha256 }}
+      upload-assets: true
+
+  # ── 7. publish (PyPI Trusted Publishing) ─────────────────────────────
+  publish:
+    name: publish to ${{ needs.prepare.outputs.is_rc == 'true' && 'TestPyPI' || 'PyPI' }}
+    needs: [prepare, build, sbom, provenance]
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ needs.prepare.outputs.is_rc == 'true' && 'testpypi' || 'pypi' }}
+      url: ${{ needs.prepare.outputs.is_rc == 'true' && 'https://test.pypi.org/p/shieldops-sdk' || 'https://pypi.org/p/shieldops-sdk' }}
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: dist
+          path: dist/
+      - name: Publish (TestPyPI for rc tags)
+        if: needs.prepare.outputs.is_rc == 'true'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+      - name: Publish (PyPI for release tags)
+        if: needs.prepare.outputs.is_rc == 'false'
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  # ── 8. verify-published ──────────────────────────────────────────────
+  verify-published:
+    name: verify pip install + import + signature snapshot
+    needs: [prepare, publish]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Wait for index propagation
+        run: sleep 30
+      - name: pip install in a fresh venv
+        run: |
+          python -m venv /tmp/verify
+          /tmp/verify/bin/pip install --upgrade pip
+          if [[ "${{ needs.prepare.outputs.is_rc }}" == "true" ]]; then
+            /tmp/verify/bin/pip install --index-url https://test.pypi.org/simple/ \
+              --extra-index-url https://pypi.org/simple/ \
+              "shieldops-sdk==${{ needs.prepare.outputs.sdk_version }}"
+          else
+            /tmp/verify/bin/pip install "shieldops-sdk==${{ needs.prepare.outputs.sdk_version }}"
+          fi
+      - name: Import smoke test
+        run: /tmp/verify/bin/python -c "from shieldops_sdk import ShieldOpsInterceptor; ShieldOpsInterceptor()"

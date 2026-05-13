@@ -1,0 +1,62 @@
+# Dependabot config for shieldops-sdk (PRD-028 PR α).
+#
+# Authored in the private monorepo at sdk/.github/dependabot.yml; rides
+# the carve-out mirror to shieldops-io/shieldops-sdk.
+#
+# SLA per PRD-028 §"PR α / Acceptance criteria":
+#   - high-severity advisories  → 7 days
+#   - medium-severity advisories → 30 days
+#
+# Dependabot itself respects the GitHub Advisory Database for severity
+# labeling; the timelines above are enforced by team policy + the
+# auto-merge schedule below (informational `commit-message.prefix`
+# tagging that monitoring can grep).
+
+version: 2
+
+updates:
+  # ── Python (the SDK itself) ──────────────────────────────────────────
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "deps(pip)"
+      include: "scope"
+    groups:
+      runtime:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "pytest*"
+          - "ruff"
+          - "mypy"
+          - "hatch*"
+          - "build"
+      dev:
+        patterns:
+          - "pytest*"
+          - "ruff"
+          - "mypy"
+          - "hatch*"
+          - "build"
+    # Security-only updates run on a tighter cadence — Dependabot opens
+    # those PRs immediately on advisory publish.
+    labels:
+      - "dependencies"
+      - "python"
+
+  # ── GitHub Actions (release.yml + ci.yml) ────────────────────────────
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps(actions)"
+    labels:
+      - "dependencies"
+      - "github-actions"
