@@ -180,12 +180,14 @@ jobs:
     uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.0.0
     with:
       base64-subjects: ${{ needs.build.outputs.sdist_sha256 }} ${{ needs.build.outputs.wheel_sha256 }}
-      # `upload-assets: true` requires an existing GitHub Release for the
-      # triggering tag. Releases are created post-verify-published (see
-      # SDK_RELEASE_PLAYBOOK.md step 8); the provenance .intoto.jsonl is
-      # still attached as a workflow artifact and assemble_release_evidence.sh
-      # picks it up from there.
-      upload-assets: false
+      # SLSA's reusable workflow `final` job hard-fails when upload-assets is
+      # false (its SUCCESS output comes from the upload-assets outcome). The
+      # working combo is upload-assets=true + draft-release=true: SLSA creates
+      # a draft GitHub Release for the triggering tag if one doesn't exist
+      # yet and attaches the .intoto.jsonl. Step 8 of the playbook then
+      # promotes the draft via `gh release edit --draft=false`.
+      upload-assets: true
+      draft-release: true
 
   # ── 7. publish (PyPI Trusted Publishing) ─────────────────────────────
   publish:
