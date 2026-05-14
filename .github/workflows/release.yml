@@ -12,6 +12,16 @@
 # Manual approval (production only): the `pypi` environment requires
 # @ghantakiran sign-off on the first 5 releases (PRD-028 §Phase 7).
 #
+# OPERATOR NOTE — tag-push dedup quirk: the WARP mirror force-pushes
+# main:main FIRST then refs/tags/<tag> at the same SHA. GitHub sometimes
+# deduplicates the tag-push event when it lands on a SHA that just got
+# a main-push event for the same workflow file, and the workflow then
+# never fires for the tag. Workaround: ensure each tag points at a SHA
+# not previously seen on main (a no-op churn commit on a comment is
+# enough). The dependency on this is fragile; tracking #675 for a
+# proper mirror-side fix (push tag-only with no preceding main push, or
+# push tag BEFORE main).
+#
 # See docs/internal/SDK_RELEASE_YML_OUTLINE.md (private monorepo) for the
 # design notes and the source-of-truth list of jobs + secrets.
 
