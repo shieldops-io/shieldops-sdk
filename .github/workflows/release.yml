@@ -216,6 +216,11 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
+          # Re-running an RC at the same version (e.g. when iterating on
+          # release.yml itself) must not fail because TestPyPI already has
+          # the wheel. Production publish below intentionally omits this —
+          # a duplicate upload there is an error condition.
+          skip-existing: true
       - name: Publish (PyPI for release tags)
         if: needs.prepare.outputs.is_rc == 'false'
         uses: pypa/gh-action-pypi-publish@release/v1
