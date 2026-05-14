@@ -192,7 +192,14 @@ jobs:
   # ── 7. publish (PyPI Trusted Publishing) ─────────────────────────────
   publish:
     name: publish to ${{ needs.prepare.outputs.is_rc == 'true' && 'TestPyPI' || 'PyPI' }}
-    needs: [prepare, build, sbom, provenance]
+    # NOTE: provenance is intentionally NOT in `needs`. slsa-github-generator
+    # v2.0.0+v2.1.0 both have a buggy `final` reporter job that hard-fails
+    # with SUCCESS=false even when upload-assets succeeds and the .intoto.jsonl
+    # is correctly attached to the draft Release. Keeping it in `needs` would
+    # cascade the cosmetic failure and skip publish. We still wait for
+    # `build` (we publish those artifacts) and `sbom` (so the SBOM job
+    # finishes before publish starts).
+    needs: [prepare, build, sbom]
     runs-on: ubuntu-latest
     environment:
       name: ${{ needs.prepare.outputs.is_rc == 'true' && 'testpypi' || 'pypi' }}
