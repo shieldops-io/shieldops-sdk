@@ -230,7 +230,30 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Wait for index propagation
-        run: sleep 30
+        # PyPI/TestPyPI return 200 OK on upload but the /simple/ index that
+        # pip consults updates asynchronously. The previous fixed `sleep 30`
+        # raced this in rc1 (0.1.1 uploaded but only 0.1.0 visible to pip).
+        # Poll the simple index until the published version appears, capped
+        # at ~3 minutes so a real outage still fails the job cleanly.
+        run: |
+          PKG_VERSION="${{ needs.prepare.outputs.sdk_version }}"
+          PKG_VERSION="${PKG_VERSION%-rc*}"
+          if [[ "${{ needs.prepare.outputs.is_rc }}" == "true" ]]; then
+            INDEX_URL="https://test.pypi.org/simple/shieldops-sdk/"
+          else
+            INDEX_URL="https://pypi.org/simple/shieldops-sdk/"
+          fi
+          echo "Polling ${INDEX_URL} for shieldops-sdk-${PKG_VERSION} (max 180s)..."
+          for i in $(seq 1 18); do
+            if curl -fsSL "${INDEX_URL}" | grep -q "shieldops_sdk-${PKG_VERSION}"; then
+              echo "Found shieldops-sdk-${PKG_VERSION} on simple index after ~$((i*10))s."
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::shieldops-sdk-${PKG_VERSION} did NOT appear on ${INDEX_URL} within 180s." >&2
+          curl -fsSL "${INDEX_URL}" | tail -20 >&2 || true
+          exit 1
       - name: pip install in a fresh venv
         run: |
           # The published wheel uses pyproject.toml's version, which is the
