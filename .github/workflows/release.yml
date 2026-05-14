@@ -32,6 +32,18 @@ on:
     tags:
       - "sdk-v[0-9]+.[0-9]+.[0-9]+"
       - "sdk-v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+"
+  # Manual escape hatch: GitHub occasionally drops tag-push events when
+  # the tag lands on a SHA that already has a main-push event (observed
+  # silently swallowing sdk-v0.1.1-rc4 and rc5 — tags on remote, no run).
+  # workflow_dispatch lets the operator (and only the operator — public
+  # repo has no Contributors) invoke the pipeline against an arbitrary
+  # ref via the Actions tab or `gh workflow run release.yml --ref <tag>`.
+  workflow_dispatch:
+    inputs:
+      ref_to_run:
+        description: "Tag or commit SHA to release from (for status display only; pipeline resolves the version from the actual git ref)"
+        required: false
+        type: string
 
 permissions:
   contents: read
