@@ -12,6 +12,21 @@ class ShieldOpsError(Exception):
         self.status_code = status_code
 
 
+class ShieldOpsConfigError(ShieldOpsError):
+    """Configuration could not be loaded.
+
+    Raised by ``ShieldOpsConfig.from_env(strict=True)`` /
+    ``ShieldOpsInterceptor.from_env(strict=True)`` when SHIELDOPS_*
+    environment variables are present but unparseable, when telemetry
+    requires credentials that aren't set, or when an unrecognized
+    SHIELDOPS_* env var is present. Without ``strict=True`` these are
+    silently ignored to preserve the historic constructor behavior.
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+
+
 class AuthenticationError(ShieldOpsError):
     """Invalid or expired API credentials (401/403)."""
 

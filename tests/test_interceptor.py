@@ -123,3 +123,41 @@ class TestAsyncCheck:
         interceptor = ShieldOpsInterceptor(config)
         with pytest.raises(ShieldOpsDeniedError):
             await interceptor.async_check("delete_database")
+
+
+class TestInterceptorFromEnv:
+    """``ShieldOpsInterceptor.from_env()`` classmethod (0.1.2)."""
+
+    def test_returns_interceptor_with_env_config(self) -> None:
+        import os
+        from unittest.mock import patch
+
+        with patch.dict(
+            os.environ,
+            {"SHIELDOPS_API_KEY": "sk-env", "SHIELDOPS_MODE": "enforce"},
+            clear=True,
+        ):
+            interceptor = ShieldOpsInterceptor.from_env()
+
+        assert isinstance(interceptor, ShieldOpsInterceptor)
+        assert interceptor._config.api_key == "sk-env"
+        assert interceptor._config.mode == SDKMode.ENFORCE
+
+    def test_kwargs_override_env(self) -> None:
+        import os
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {"SHIELDOPS_MODE": "audit"}, clear=True):
+            interceptor = ShieldOpsInterceptor.from_env(mode=SDKMode.ENFORCE)
+        assert interceptor._config.mode == SDKMode.ENFORCE
+
+    def test_strict_mode_passes_through(self) -> None:
+        """`strict=True` reaches the underlying Config validator."""
+        import os
+        from unittest.mock import patch
+
+        from shieldops_sdk.exceptions import ShieldOpsConfigError
+
+        with patch.dict(os.environ, {"SHIELDOPS_MODE": "enforece"}, clear=True):
+            with pytest.raises(ShieldOpsConfigError):
+                ShieldOpsInterceptor.from_env(strict=True)

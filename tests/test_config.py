@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from unittest.mock import patch
 
-from shieldops_sdk.config import SDKMode, ShieldOpsConfig
+from shieldops_sdk.config import SDKMode, SDKTelemetry, ShieldOpsConfig
 
 
 class TestConfigDefaults:
@@ -50,6 +50,89 @@ class TestConfigFromEnv:
         with patch.dict(os.environ, {"SHIELDOPS_API_KEY": "sk-env"}):
             config = ShieldOpsConfig(api_key="sk-explicit")
         assert config.api_key == "sk-explicit"
+
+
+class TestFromEnvClassmethod:
+    """Explicit ``ShieldOpsConfig.from_env()`` factory (0.1.2)."""
+
+    def test_returns_config_with_env_values(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "SHIELDOPS_API_KEY": "sk-fromenv",
+                "SHIELDOPS_ENDPOINT": "http://from-env:9000",
+                "SHIELDOPS_MODE": "enforce",
+            },
+            clear=True,
+        ):
+            config = ShieldOpsConfig.from_env()
+
+        assert isinstance(config, ShieldOpsConfig)
+        assert config.api_key == "sk-fromenv"
+        assert config.endpoint == "http://from-env:9000"
+        assert config.mode == SDKMode.ENFORCE
+
+    def test_telemetry_from_env(self) -> None:
+        with patch.dict(os.environ, {"SHIELDOPS_TELEMETRY": "remote"}, clear=True):
+            config = ShieldOpsConfig.from_env()
+        assert config.telemetry == SDKTelemetry.REMOTE
+
+    def test_kwargs_override_env(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"SHIELDOPS_API_KEY": "sk-env", "SHIELDOPS_MODE": "audit"},
+            clear=True,
+        ):
+            config = ShieldOpsConfig.from_env(api_key="sk-override", mode=SDKMode.ENFORCE)
+
+        assert config.api_key == "sk-override"
+        assert config.mode == SDKMode.ENFORCE
+
+
+class TestFromEnvStrict:
+    """``ShieldOpsConfig.from_env(strict=True)`` fails loud on misconfig."""
+
+    def test_unparseable_mode_raises(self) -> None:
+        import pytest
+
+        from shieldops_sdk.exceptions import ShieldOpsConfigError
+
+        with patch.dict(os.environ, {"SHIELDOPS_MODE": "enforece"}, clear=True):
+            with pytest.raises(ShieldOpsConfigError, match="SHIELDOPS_MODE"):
+                ShieldOpsConfig.from_env(strict=True)
+
+    def test_unparseable_mode_silently_ignored_when_not_strict(self) -> None:
+        with patch.dict(os.environ, {"SHIELDOPS_MODE": "enforece"}, clear=True):
+            config = ShieldOpsConfig.from_env()  # strict=False default
+        # Falls back to the AUDIT default — same as historic behavior.
+        assert config.mode == SDKMode.AUDIT
+
+    def test_remote_telemetry_without_api_key_raises(self) -> None:
+        import pytest
+
+        from shieldops_sdk.exceptions import ShieldOpsConfigError
+
+        with patch.dict(os.environ, {"SHIELDOPS_TELEMETRY": "remote"}, clear=True):
+            with pytest.raises(ShieldOpsConfigError, match="api_key"):
+                ShieldOpsConfig.from_env(strict=True)
+
+    def test_unknown_shieldops_env_var_raises(self) -> None:
+        import pytest
+
+        from shieldops_sdk.exceptions import ShieldOpsConfigError
+
+        with patch.dict(os.environ, {"SHIELDOPS_TIMOUT": "10"}, clear=True):
+            with pytest.raises(ShieldOpsConfigError, match="SHIELDOPS_TIMOUT"):
+                ShieldOpsConfig.from_env(strict=True)
+
+    def test_unparseable_telemetry_raises(self) -> None:
+        import pytest
+
+        from shieldops_sdk.exceptions import ShieldOpsConfigError
+
+        with patch.dict(os.environ, {"SHIELDOPS_TELEMETRY": "OTL"}, clear=True):
+            with pytest.raises(ShieldOpsConfigError, match="SHIELDOPS_TELEMETRY"):
+                ShieldOpsConfig.from_env(strict=True)
 
 
 class TestConfigProperties:

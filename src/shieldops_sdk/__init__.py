@@ -19,11 +19,12 @@ from __future__ import annotations
 
 from shieldops_sdk.async_client import AsyncShieldOpsClient
 from shieldops_sdk.client import ShieldOpsClient
-from shieldops_sdk.config import SDKMode, ShieldOpsConfig
+from shieldops_sdk.config import SDKMode, SDKTelemetry, ShieldOpsConfig
 from shieldops_sdk.exceptions import (
     AuthenticationError,
     NotFoundError,
     RateLimitError,
+    ShieldOpsConfigError,
     ShieldOpsConnectionError,
     ShieldOpsDeniedError,
     ShieldOpsError,
@@ -38,8 +39,10 @@ __all__ = [
     "NotFoundError",
     "RateLimitError",
     "SDKMode",
+    "SDKTelemetry",
     "ShieldOpsClient",
     "ShieldOpsConfig",
+    "ShieldOpsConfigError",
     "ShieldOpsConnectionError",
     "ShieldOpsDeniedError",
     "ShieldOpsError",

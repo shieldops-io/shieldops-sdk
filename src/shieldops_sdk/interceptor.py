@@ -65,6 +65,20 @@ class ShieldOpsInterceptor:
         self._call_count: int = 0
         self._deny_count: int = 0
 
+    @classmethod
+    def from_env(cls, *, strict: bool = False, **overrides: Any) -> ShieldOpsInterceptor:
+        """One-liner factory: build a Config from env, then an Interceptor.
+
+        Equivalent to::
+
+            ShieldOpsInterceptor(ShieldOpsConfig.from_env(strict=..., **overrides))
+
+        Use this when you just want an interceptor wired from SHIELDOPS_*
+        environment variables; pass kwargs to override any field.
+        """
+        config = ShieldOpsConfig.from_env(strict=strict, **overrides)
+        return cls(config)
+
     def check(
         self,
         tool_name: str,
