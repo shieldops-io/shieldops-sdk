@@ -19,6 +19,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.1.1] - 2026-05-13
+
+Pipeline-fix release. No SDK behaviour changes — same public API, same
+default semantics. `0.1.0` proved publish + install + import end-to-end
+against production PyPI; this release validates the verify-published
+smoke-test fix on a fresh version.
+
+### Fixed
+
+- **release pipeline** — `verify-published` job's import smoke test now
+  passes a `ShieldOpsConfig` to `ShieldOpsInterceptor`. The 0.1.0 release
+  hit `TypeError: missing 1 required positional argument: 'config'`
+  because the smoke-test one-liner instantiated `ShieldOpsInterceptor()`
+  with no args. PyPI publish itself was unaffected (#668).
+- **release pipeline** — `verify-published` install pin now strips the
+  `-rcN` suffix from the resolved tag so RC rehearsals install the
+  actual wheel version that PyPI accepted (#667).
+- **release pipeline** — `publish` job decoupled from the buggy
+  `slsa-github-generator` `final` reporter, which hard-fails with
+  `SUCCESS=false` on v2.0.0 and v2.1.0 even when provenance + upload
+  succeed (#666). Provenance still runs in parallel.
+
+### Internal
+
+- New `test_packaging.py` fences: pre-1.0 version invariant,
+  CHANGELOG-coherence (mirrors release.yml prepare-job validation), and
+  the verify-published smoke-test invariant codified as a unit test.
+
 ## [0.1.0] - 2026-05-10
 
 First public release. Local-first by default — `ShieldOpsConfig()` with no

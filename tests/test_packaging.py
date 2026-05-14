@@ -1,18 +1,21 @@
-"""Phase 2 PR-D — packaging metadata coherence fences.
+"""Packaging metadata coherence fences for the public SDK.
 
-These tests lock in the invariant that:
-
+Locks in:
 - ``shieldops_sdk.__version__`` and ``pyproject.toml`` ``version`` always agree.
 - The release-readiness classifier is honest (no ``Production/Stable`` while
   the SDK is still pre-1.0 with no external users).
-- Aspirational 1.x version strings have been removed from the public package.
-
-A future bump only needs to change ``__init__.py`` and ``pyproject.toml``;
-these tests catch drift.
+- The SDK stays on the pre-1.0 train until the strategy explicitly flips.
+- Every released version has a dated CHANGELOG section (mirrors the
+  release.yml ``prepare`` job, so the bump is atomic locally).
+- The verify-published smoke-test invariant (PR #668): the default
+  constructor path ``ShieldOpsInterceptor(ShieldOpsConfig())`` works without
+  further arguments. Catches signature drift before it breaks the release
+  pipeline.
 """
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -25,6 +28,7 @@ import shieldops_sdk
 
 SDK_ROOT = Path(__file__).resolve().parents[1]
 PYPROJECT = SDK_ROOT / "pyproject.toml"
+CHANGELOG = SDK_ROOT / "CHANGELOG.md"
 
 
 def _pyproject() -> dict:
@@ -41,12 +45,14 @@ def test_version_coherence_between_init_and_pyproject() -> None:
     )
 
 
-def test_version_is_first_public_release() -> None:
-    """First public version is 0.1.0 — strategy locked in Q5."""
-    assert shieldops_sdk.__version__ == "0.1.0", (
-        f"Expected 0.1.0 (first public release per strategy); got "
-        f"{shieldops_sdk.__version__!r}. Public version policy: pre-1.0 "
-        "until the public repo + external users land."
+def test_version_is_pre_one_dot_oh() -> None:
+    """SDK stays on the pre-1.0 train; flipping to 1.x.x requires a deliberate
+    strategy change (and removal of this fence). 0.X.Y patch bumps are fine.
+    """
+    version = shieldops_sdk.__version__
+    assert re.fullmatch(r"0\.\d+\.\d+", version), (
+        f"Expected a pre-1.0 X.Y.Z version (0.X.Y); got {version!r}. "
+        "Bumping to 1.x.x is a strategy decision, not a routine change."
     )
 
 
@@ -67,6 +73,35 @@ def test_development_status_is_pre_one_dot_oh() -> None:
     assert ("3 - Alpha" in dev_status[0]) or ("4 - Beta" in dev_status[0]), (
         f"Expected Alpha or Beta development status; got {dev_status[0]!r}"
     )
+
+
+def test_changelog_has_dated_section_for_current_version() -> None:
+    """Every released version MUST have a dated CHANGELOG entry of the form
+    ``## [X.Y.Z] - YYYY-MM-DD``. Mirrors release.yml's prepare-job regex; if
+    this fence is green locally, the tag won't fail validation in CI.
+    """
+    version = _pyproject()["project"]["version"]
+    body = CHANGELOG.read_text(encoding="utf-8")
+    pattern = re.compile(
+        rf"^## \[{re.escape(version)}\]\s+-\s+\d{{4}}-\d{{2}}-\d{{2}}",
+        re.MULTILINE,
+    )
+    assert pattern.search(body), (
+        f"CHANGELOG.md is missing a dated section for [{version}]. "
+        f"Add a line like `## [{version}] - YYYY-MM-DD` before tagging."
+    )
+
+
+def test_default_interceptor_smoke() -> None:
+    """``ShieldOpsInterceptor(ShieldOpsConfig())`` must construct with no
+    further arguments. This is the exact invariant verify-published checks
+    after pip-installing the wheel; pinning it here catches constructor
+    signature drift in unit tests instead of at release time (PR #668).
+    """
+    from shieldops_sdk import ShieldOpsConfig, ShieldOpsInterceptor
+
+    interceptor = ShieldOpsInterceptor(ShieldOpsConfig())
+    assert interceptor is not None
 
 
 def test_python_floor_is_three_ten() -> None:
