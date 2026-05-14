@@ -161,3 +161,71 @@ class TestInterceptorFromEnv:
         with patch.dict(os.environ, {"SHIELDOPS_MODE": "enforece"}, clear=True):
             with pytest.raises(ShieldOpsConfigError):
                 ShieldOpsInterceptor.from_env(strict=True)
+
+
+class TestInterceptorContextManagerSyncScope:
+    """`with interceptor as scope:` yields a per-scope stats snapshot (0.1.2)."""
+
+    def test_scope_records_call_delta(self) -> None:
+        config = ShieldOpsConfig(mode=SDKMode.AUDIT)
+        interceptor = ShieldOpsInterceptor(config)
+        with interceptor as scope:
+            interceptor.check("safe_tool_a")
+            interceptor.check("safe_tool_b")
+        assert scope.calls == 2
+        assert scope.denials == 0
+        assert scope.mode == "audit"
+        assert scope.duration_s >= 0.0
+
+    def test_scope_isolates_per_block(self) -> None:
+        """Two sequential `with` blocks must report each block's own delta."""
+        config = ShieldOpsConfig(mode=SDKMode.AUDIT)
+        interceptor = ShieldOpsInterceptor(config)
+        with interceptor as first:
+            interceptor.check("a")
+        with interceptor as second:
+            interceptor.check("a")
+            interceptor.check("b")
+            interceptor.check("c")
+        assert first.calls == 1
+        assert second.calls == 3
+
+    def test_scope_records_denials(self) -> None:
+        config = ShieldOpsConfig(mode=SDKMode.ENFORCE)
+        interceptor = ShieldOpsInterceptor(config)
+        with interceptor as scope:
+            interceptor.check("safe_tool")
+            try:
+                interceptor.check("delete_database")
+            except ShieldOpsDeniedError:
+                pass
+        assert scope.calls == 2
+        assert scope.denials == 1
+
+
+class TestInterceptorContextManagerAsyncScope:
+    """`async with interceptor as scope:` yields the same per-scope stats (0.1.2)."""
+
+    @pytest.mark.asyncio
+    async def test_async_scope_records_call_delta(self) -> None:
+        config = ShieldOpsConfig(mode=SDKMode.AUDIT)
+        interceptor = ShieldOpsInterceptor(config)
+        async with interceptor as scope:
+            await interceptor.async_check("safe_a")
+            await interceptor.async_check("safe_b")
+        assert scope.calls == 2
+        assert scope.denials == 0
+        assert scope.mode == "audit"
+
+    @pytest.mark.asyncio
+    async def test_async_scope_records_denials(self) -> None:
+        config = ShieldOpsConfig(mode=SDKMode.ENFORCE)
+        interceptor = ShieldOpsInterceptor(config)
+        async with interceptor as scope:
+            await interceptor.async_check("safe_tool")
+            try:
+                await interceptor.async_check("delete_database")
+            except ShieldOpsDeniedError:
+                pass
+        assert scope.calls == 2
+        assert scope.denials == 1

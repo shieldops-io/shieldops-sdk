@@ -6,6 +6,7 @@ import hashlib
 import logging
 import time
 import uuid
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -38,6 +39,31 @@ class Decision(BaseModel):
     reasons: list[str] = Field(default_factory=list)
     request_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     evaluated_at: float = Field(default_factory=time.time)
+
+
+@dataclass
+class ScopeStats:
+    """Per-context-manager scope statistics, yielded by ``ShieldOpsInterceptor.__enter__``.
+
+    Populated on ``__exit__`` (sync or async). Underscore-prefixed fields are
+    internal entry-time snapshots; public fields are the deltas computed on
+    exit. Pattern::
+
+        with interceptor as scope:
+            interceptor.check("delete_user", {"id": 42})
+        assert scope.calls == 1
+        assert scope.denials == 0
+        assert scope.duration_s >= 0.0
+        assert scope.mode in ("audit", "enforce")
+    """
+
+    _start_calls: int
+    _start_denials: int
+    _start_time: float
+    calls: int = 0
+    denials: int = 0
+    duration_s: float = 0.0
+    mode: str = "audit"
 
 
 class ShieldOpsInterceptor:
@@ -223,9 +249,46 @@ class ShieldOpsInterceptor:
         return hashlib.sha256(raw).hexdigest()[:16]
 
     # -- Context manager -------------------------------------------------------
+    #
+    # 0.1.2: ctx mgr yields a per-scope stats snapshot. On entry, snapshots
+    # current counters + start time. On exit, mutates the scope with the
+    # delta (calls / denials / duration_s / mode). Pattern:
+    #
+    #     with interceptor as scope:
+    #         interceptor.check("delete_user", {"id": 42})
+    #         interceptor.check("read_user",   {"id": 42})
+    #     assert scope.calls == 2
+    #
+    # Same shape for sync and async; the only difference is the await keyword
+    # in async usage. No telemetry-flush coupling — the Interceptor and the
+    # ShieldOpsTelemetry surface remain independent.
 
-    async def __aenter__(self) -> ShieldOpsInterceptor:
-        return self
+    def _new_scope(self) -> ScopeStats:
+        return ScopeStats(
+            _start_calls=self._call_count,
+            _start_denials=self._deny_count,
+            _start_time=time.monotonic(),
+            calls=0,
+            denials=0,
+            duration_s=0.0,
+            mode=self._config.mode.value,
+        )
+
+    def _close_scope(self, scope: ScopeStats) -> None:
+        scope.calls = self._call_count - scope._start_calls
+        scope.denials = self._deny_count - scope._start_denials
+        scope.duration_s = time.monotonic() - scope._start_time
+
+    def __enter__(self) -> ScopeStats:
+        self._sync_scope = self._new_scope()
+        return self._sync_scope
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        self._close_scope(self._sync_scope)
+
+    async def __aenter__(self) -> ScopeStats:
+        self._async_scope = self._new_scope()
+        return self._async_scope
 
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        pass
+        self._close_scope(self._async_scope)

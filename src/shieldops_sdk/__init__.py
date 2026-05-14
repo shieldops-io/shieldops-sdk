@@ -30,7 +30,7 @@ from shieldops_sdk.exceptions import (
     ShieldOpsError,
     ValidationError,
 )
-from shieldops_sdk.interceptor import Decision, ShieldOpsInterceptor, ToolCall
+from shieldops_sdk.interceptor import Decision, ScopeStats, ShieldOpsInterceptor, ToolCall
 
 __all__ = [
     "AsyncShieldOpsClient",
@@ -40,6 +40,7 @@ __all__ = [
     "RateLimitError",
     "SDKMode",
     "SDKTelemetry",
+    "ScopeStats",
     "ShieldOpsClient",
     "ShieldOpsConfig",
     "ShieldOpsConfigError",
