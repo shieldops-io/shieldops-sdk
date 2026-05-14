@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import functools
 import hashlib
+import inspect
 import logging
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeVar
 
 import httpx
 from pydantic import BaseModel, Field
@@ -18,6 +21,8 @@ from shieldops_sdk._policy import (
 )
 from shieldops_sdk.config import SDKTelemetry, ShieldOpsConfig
 from shieldops_sdk.exceptions import ShieldOpsDeniedError
+
+_F = TypeVar("_F", bound=Callable[..., Any])
 
 logger = logging.getLogger("shieldops_sdk")
 
@@ -247,6 +252,66 @@ class ShieldOpsInterceptor:
         """Create a deterministic hash of tool arguments for audit logging."""
         raw = str(sorted(args.items())).encode()
         return hashlib.sha256(raw).hexdigest()[:16]
+
+    # -- Decorator -------------------------------------------------------------
+
+    def guard(self, *, tool_name: str | None = None) -> Callable[[_F], _F]:
+        """Wrap a function so its arguments are checked against ShieldOps policy.
+
+        Usage::
+
+            interceptor = ShieldOpsInterceptor.from_env()
+
+            @interceptor.guard()
+            def delete_user(user_id: int, db: str) -> None:
+                ...
+
+            delete_user(user_id=42, db="prod")  # check("...delete_user", {...})
+
+        Defaults:
+
+        - ``tool_name``: ``fn.__qualname__`` (includes class context for methods)
+        - args dict: ``inspect.signature(fn).bind(*args, **kwargs).arguments`` —
+          positional and keyword args are bound to parameter names so policy
+          patterns that key on specific arg names see the right values
+          regardless of call style.
+        - sync vs async: auto-detected via ``inspect.iscoroutinefunction``;
+          async functions dispatch to ``async_check``, sync to ``check``.
+        - ``ShieldOpsDeniedError`` propagates: the caller chooses how to
+          respond (return 403 in a web handler, log+bail in a worker, etc.).
+        """
+
+        def _decorator(fn: _F) -> _F:
+            resolved_name = tool_name or fn.__qualname__
+            sig = inspect.signature(fn)
+            is_async = inspect.iscoroutinefunction(fn)
+
+            def _bind_args(args: tuple, kwargs: dict) -> dict:
+                try:
+                    bound = sig.bind(*args, **kwargs)
+                    return dict(bound.arguments)
+                except TypeError:
+                    # Mismatched signature — let the wrapped fn raise its own
+                    # TypeError when called; just forward whatever kwargs we have.
+                    return dict(kwargs)
+
+            if is_async:
+
+                @functools.wraps(fn)
+                async def _async_wrapper(*args: Any, **kwargs: Any) -> Any:
+                    await self.async_check(resolved_name, _bind_args(args, kwargs))
+                    return await fn(*args, **kwargs)
+
+                return _async_wrapper  # type: ignore[return-value]
+
+            @functools.wraps(fn)
+            def _sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+                self.check(resolved_name, _bind_args(args, kwargs))
+                return fn(*args, **kwargs)
+
+            return _sync_wrapper  # type: ignore[return-value]
+
+        return _decorator
 
     # -- Context manager -------------------------------------------------------
     #

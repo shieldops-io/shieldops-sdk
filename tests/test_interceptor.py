@@ -229,3 +229,171 @@ class TestInterceptorContextManagerAsyncScope:
                 pass
         assert scope.calls == 2
         assert scope.denials == 1
+
+
+class TestInterceptorGuardDecoratorSync:
+    """`@interceptor.guard()` wraps a function with firewall interception (0.1.2)."""
+
+    def test_allows_safe_call_and_returns_value(self) -> None:
+        interceptor = ShieldOpsInterceptor(ShieldOpsConfig(mode=SDKMode.AUDIT))
+
+        @interceptor.guard()
+        def safe_tool(user_id: int) -> str:
+            return f"user-{user_id}"
+
+        result = safe_tool(42)
+        assert result == "user-42"
+
+    def test_propagates_denial_in_enforce_mode(self) -> None:
+        """ShieldOpsDeniedError propagates; the wrapped fn never runs.
+
+        Uses explicit tool_name="delete_database" because the default
+        __qualname__ on a method-local function is fully-qualified
+        (e.g. `TestX.test_y.<locals>.delete_database`) and the SDK's
+        default policy lookup is exact-match, not substring.
+        """
+        interceptor = ShieldOpsInterceptor(ShieldOpsConfig(mode=SDKMode.ENFORCE))
+
+        @interceptor.guard(tool_name="delete_database")
+        def runner(db: str) -> None:
+            raise AssertionError("should not run when denied")
+
+        with pytest.raises(ShieldOpsDeniedError):
+            runner(db="users")
+
+    def test_args_bound_by_parameter_name(self) -> None:
+        """Positional + keyword args are bound to parameter names so policy
+        patterns that key on `db_name` see the right value regardless of
+        call style.
+        """
+        seen: list[dict] = []
+        interceptor = ShieldOpsInterceptor(ShieldOpsConfig(mode=SDKMode.AUDIT))
+
+        # Monkey-patch check to capture what it sees, without touching policy.
+        orig_check = interceptor.check
+
+        def spy_check(tool_name: str, args: dict | None = None) -> object:
+            seen.append({"tool": tool_name, "args": dict(args or {})})
+            return orig_check(tool_name, args)
+
+        interceptor.check = spy_check  # type: ignore[method-assign]
+
+        @interceptor.guard()
+        def do_work(user_id: int, action: str) -> str:
+            return "ok"
+
+        do_work(7, action="read")
+        assert seen and seen[0]["args"] == {"user_id": 7, "action": "read"}
+
+    def test_tool_name_defaults_to_qualname(self) -> None:
+        seen: list[str] = []
+        interceptor = ShieldOpsInterceptor(ShieldOpsConfig(mode=SDKMode.AUDIT))
+
+        orig_check = interceptor.check
+
+        def spy_check(tool_name: str, args: dict | None = None) -> object:
+            seen.append(tool_name)
+            return orig_check(tool_name, args)
+
+        interceptor.check = spy_check  # type: ignore[method-assign]
+
+        class _Svc:
+            @interceptor.guard()
+            def handle(self, x: int) -> int:
+                return x
+
+        _Svc().handle(1)
+        assert seen[0].endswith("handle")  # includes class qualname
+        assert "._Svc." in seen[0] or "handle" in seen[0]
+
+    def test_explicit_tool_name_override(self) -> None:
+        seen: list[str] = []
+        interceptor = ShieldOpsInterceptor(ShieldOpsConfig(mode=SDKMode.AUDIT))
+
+        orig_check = interceptor.check
+
+        def spy_check(tool_name: str, args: dict | None = None) -> object:
+            seen.append(tool_name)
+            return orig_check(tool_name, args)
+
+        interceptor.check = spy_check  # type: ignore[method-assign]
+
+        @interceptor.guard(tool_name="custom_tool_name")
+        def somefn() -> None:
+            return None
+
+        somefn()
+        assert seen == ["custom_tool_name"]
+
+
+class TestInterceptorGuardDecoratorAsync:
+    """`@interceptor.guard()` on `async def` dispatches to async_check (0.1.2)."""
+
+    @pytest.mark.asyncio
+    async def test_async_allows_safe_call_and_returns_value(self) -> None:
+        interceptor = ShieldOpsInterceptor(ShieldOpsConfig(mode=SDKMode.AUDIT))
+
+        @interceptor.guard()
+        async def safe_async(user_id: int) -> str:
+            return f"async-user-{user_id}"
+
+        result = await safe_async(7)
+        assert result == "async-user-7"
+
+    @pytest.mark.asyncio
+    async def test_async_propagates_denial(self) -> None:
+        interceptor = ShieldOpsInterceptor(ShieldOpsConfig(mode=SDKMode.ENFORCE))
+
+        @interceptor.guard(tool_name="delete_database")
+        async def runner(db: str) -> None:
+            raise AssertionError("should not run when denied")
+
+        with pytest.raises(ShieldOpsDeniedError):
+            await runner(db="prod")
+
+    @pytest.mark.asyncio
+    async def test_async_uses_async_check_not_sync_check(self) -> None:
+        """Verify dispatch goes to async_check (the awaitable path)."""
+        interceptor = ShieldOpsInterceptor(ShieldOpsConfig(mode=SDKMode.AUDIT))
+        seen: list[str] = []
+
+        orig_async = interceptor.async_check
+
+        async def spy_async(tool_name: str, args: dict | None = None) -> object:
+            seen.append(tool_name)
+            return await orig_async(tool_name, args)
+
+        interceptor.async_check = spy_async  # type: ignore[method-assign]
+
+        @interceptor.guard(tool_name="some_async_tool")
+        async def fn() -> None:
+            return None
+
+        await fn()
+        assert seen == ["some_async_tool"]
+
+
+class TestInterceptorGuardDecoratorMetadata:
+    """The decorator preserves wrapped-function metadata (0.1.2)."""
+
+    def test_preserves_name_and_doc(self) -> None:
+        interceptor = ShieldOpsInterceptor(ShieldOpsConfig(mode=SDKMode.AUDIT))
+
+        @interceptor.guard()
+        def my_tool() -> str:
+            """My tool's docstring."""
+            return "ok"
+
+        assert my_tool.__name__ == "my_tool"
+        assert my_tool.__doc__ == "My tool's docstring."
+
+    def test_preserves_async_name_and_doc(self) -> None:
+        interceptor = ShieldOpsInterceptor(ShieldOpsConfig(mode=SDKMode.AUDIT))
+
+        @interceptor.guard()
+        async def my_async_tool() -> str:
+            """Async tool docstring."""
+            return "ok"
+
+        assert my_async_tool.__name__ == "my_async_tool"
+        assert my_async_tool.__doc__ == "Async tool docstring."
