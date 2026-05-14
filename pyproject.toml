@@ -81,3 +81,21 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+
+[tool.mypy]
+python_version = "3.10"
+# Conditional imports (opentelemetry behind a try/ImportError block;
+# sigstore only in tests) shouldn't fail strict mode when the user runs
+# `pip install -e ".[dev]"` without the extras. The runtime guards in
+# telemetry.py + the test guards in tests/integration/sigstore/ keep the
+# fallbacks honest.
+warn_unused_ignores = false
+
+[[tool.mypy.overrides]]
+module = [
+    "opentelemetry",
+    "opentelemetry.*",
+    "sigstore",
+    "sigstore.*",
+]
+ignore_missing_imports = true
