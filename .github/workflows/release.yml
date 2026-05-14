@@ -180,7 +180,12 @@ jobs:
     uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.0.0
     with:
       base64-subjects: ${{ needs.build.outputs.sdist_sha256 }} ${{ needs.build.outputs.wheel_sha256 }}
-      upload-assets: true
+      # `upload-assets: true` requires an existing GitHub Release for the
+      # triggering tag. Releases are created post-verify-published (see
+      # SDK_RELEASE_PLAYBOOK.md step 8); the provenance .intoto.jsonl is
+      # still attached as a workflow artifact and assemble_release_evidence.sh
+      # picks it up from there.
+      upload-assets: false
 
   # ── 7. publish (PyPI Trusted Publishing) ─────────────────────────────
   publish:
