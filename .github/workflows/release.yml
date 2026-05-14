@@ -233,14 +233,21 @@ jobs:
         run: sleep 30
       - name: pip install in a fresh venv
         run: |
+          # The published wheel uses pyproject.toml's version, which is the
+          # release version *without* the -rcN suffix. prepare.sdk_version
+          # carries the suffix (we use it for is_rc routing); strip it for
+          # the install pin. Confirmed in rc7: TestPyPI accepted the upload
+          # as `shieldops-sdk==0.1.0`, not `0.1.0-rc7`.
+          PKG_VERSION="${{ needs.prepare.outputs.sdk_version }}"
+          PKG_VERSION="${PKG_VERSION%-rc*}"
           python -m venv /tmp/verify
           /tmp/verify/bin/pip install --upgrade pip
           if [[ "${{ needs.prepare.outputs.is_rc }}" == "true" ]]; then
             /tmp/verify/bin/pip install --index-url https://test.pypi.org/simple/ \
               --extra-index-url https://pypi.org/simple/ \
-              "shieldops-sdk==${{ needs.prepare.outputs.sdk_version }}"
+              "shieldops-sdk==${PKG_VERSION}"
           else
-            /tmp/verify/bin/pip install "shieldops-sdk==${{ needs.prepare.outputs.sdk_version }}"
+            /tmp/verify/bin/pip install "shieldops-sdk==${PKG_VERSION}"
           fi
       - name: Import smoke test
         run: /tmp/verify/bin/python -c "from shieldops_sdk import ShieldOpsInterceptor; ShieldOpsInterceptor()"
