@@ -195,17 +195,6 @@ jobs:
   provenance:
     name: SLSA L3 provenance
     needs: build
-    # slsa-github-generator v2.0.0 and v2.1.0 both ship a buggy `final`
-    # reporter job that hard-fails (exit code 27) even when the real work
-    # — detect-env + generator + upload-assets — all succeed and the
-    # `.intoto.jsonl` is correctly attached to the draft Release. We
-    # already decoupled `publish.needs` from `provenance` in #666 so the
-    # cosmetic failure doesn't block the publish. But the run's overall
-    # conclusion still went red on every release. `continue-on-error: true`
-    # at the job level keeps the workflow conclusion honest: red only when
-    # something we care about actually broke. When SLSA fixes `final`
-    # upstream, drop this line.
-    continue-on-error: true
     permissions:
       id-token: write
       contents: write
