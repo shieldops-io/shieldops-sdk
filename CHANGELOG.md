@@ -19,6 +19,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.1.2] - 2026-05-14
+
+First user-visible feature release. Three small additions that make
+integration cleaner. No breaking changes to the public API.
+
+### Added
+
+- **`ShieldOpsConfig.from_env(*, strict=False, **overrides)`** — explicit
+  factory exposing the env-loading that already happens inside
+  `model_post_init`. Kwargs override env values.
+- **`ShieldOpsInterceptor.from_env(*, strict=False, **overrides)`** — thin
+  one-liner wrapper. `interceptor = ShieldOpsInterceptor.from_env()`.
+- **`SHIELDOPS_TELEMETRY`** env var (LOCAL | REMOTE | OTLP), mirroring
+  the existing `SHIELDOPS_MODE` handling.
+- **`strict=True`** raises `ShieldOpsConfigError` (new exception type) on:
+  unparseable `SHIELDOPS_MODE`, unparseable `SHIELDOPS_TELEMETRY`,
+  `telemetry=REMOTE` with no `api_key`, any unrecognized `SHIELDOPS_*` env
+  var.
+- **`@interceptor.guard(*, tool_name=None)`** decorator — wraps any sync
+  or async function with firewall interception. Args are extracted via
+  `inspect.signature.bind` so policy patterns that key on parameter names
+  see the right value regardless of call style.
+- **Per-scope stats on ctx mgr** — `with interceptor as scope: ...`
+  yields a `ScopeStats { calls, denials, duration_s, mode }` populated
+  on exit. Same shape for `async with`. The old no-op stub is gone.
+- **`ScopeStats`** dataclass exported via `from shieldops_sdk import ScopeStats`.
+
+### Fixed
+
+- Latent `model_post_init` bug where `SHIELDOPS_MODE=audit` would
+  override an explicit `ShieldOpsConfig(mode=ENFORCE)`. Now uses
+  `__pydantic_fields_set__` so explicit kwargs always win.
+
+### Internal
+
+- 26 new tests across the from_env + ctx mgr + guard surfaces (165 → 191
+  passing total). 2 sigstore-staging tests still CI-only.
+
 ## [0.1.1] - 2026-05-13
 
 Pipeline-fix release. No SDK behaviour changes — same public API, same
