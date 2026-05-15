@@ -8,6 +8,7 @@ import inspect
 import logging
 import time
 import uuid
+import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, TypeVar
@@ -70,6 +71,11 @@ class ScopeStats:
     duration_s: float = 0.0
     mode: str = "audit"
 
+    @property
+    def duration_ms(self) -> float:
+        """Scope duration in milliseconds — friendlier for telemetry exporters."""
+        return self.duration_s * 1000.0
+
 
 class ShieldOpsInterceptor:
     """Framework-agnostic tool call interceptor.
@@ -106,8 +112,20 @@ class ShieldOpsInterceptor:
 
         Use this when you just want an interceptor wired from SHIELDOPS_*
         environment variables; pass kwargs to override any field.
+
+        Emits a one-shot ``logger.info`` banner summarising the resolved
+        ``mode``, ``telemetry``, and whether an ``api_key`` was found. This
+        makes silent misconfigs (e.g. ``strict=False`` with no key set,
+        defaulting to LOCAL telemetry) visible at app boot without forcing
+        ``strict=True``. The api_key value itself is never logged.
         """
         config = ShieldOpsConfig.from_env(strict=strict, **overrides)
+        logger.info(
+            "shieldops.interceptor.from_env mode=%s telemetry=%s api_key=%s",
+            config.mode.value,
+            config.telemetry.value,
+            "set" if config.api_key else "unset",
+        )
         return cls(config)
 
     def check(
@@ -247,6 +265,32 @@ class ShieldOpsInterceptor:
             "mode": self._config.mode.value,
         }
 
+    def _warn_if_unguardable(self, resolved_name: str) -> None:
+        """Warn at decoration time when @guard() will be a silent no-op.
+
+        Default policy lookup is exact-match against
+        ``effective_blocked_patterns | effective_high_risk_patterns``. Default
+        ``tool_name = fn.__qualname__`` (e.g. ``Service.delete_user``,
+        ``_drop_table``) almost never matches a bare-name pattern like
+        ``"drop_table"``, so the decorator becomes a silent no-op. We surface
+        the mismatch unless the user has signalled they're using custom
+        policy via ``extra_*_patterns``.
+        """
+        if self._config.extra_blocked_patterns or self._config.extra_high_risk_patterns:
+            return
+        normalized = resolved_name.lower().strip()
+        if normalized in self._blocked_tools or normalized in self._high_risk_tools:
+            return
+        warnings.warn(
+            f"@interceptor.guard() resolved tool_name={resolved_name!r} does not "
+            "match any default blocked or high-risk pattern and no "
+            "extra_blocked_patterns/extra_high_risk_patterns are configured — "
+            "this decorator will be a no-op. Pass tool_name='<policy-key>' "
+            "explicitly, or add the name to ShieldOpsConfig(extra_blocked_patterns=...).",
+            UserWarning,
+            stacklevel=3,
+        )
+
     @staticmethod
     def hash_args(args: dict[str, Any]) -> str:
         """Create a deterministic hash of tool arguments for audit logging."""
@@ -285,6 +329,7 @@ class ShieldOpsInterceptor:
             resolved_name = tool_name or fn.__qualname__
             sig = inspect.signature(fn)
             is_async = inspect.iscoroutinefunction(fn)
+            self._warn_if_unguardable(resolved_name)
 
             def _bind_args(args: tuple, kwargs: dict) -> dict:
                 try:

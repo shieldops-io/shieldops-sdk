@@ -19,6 +19,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.1.3] - 2026-05-14
+
+Ergonomics-only follow-on to `0.1.2`. No breaking changes. Three paper-cuts
+identified in `docs/sdk/dogfood_0_1_2.md` (FastAPI + Flask cross-framework
+reproduction) are fixed:
+
+### Added
+
+- **`ScopeStats.duration_ms`** — computed property exposing the scope
+  duration in milliseconds (`duration_s * 1000.0`). `duration_s` is
+  retained for backwards compatibility. Telemetry exporters and
+  human-readable JSON responses should prefer `duration_ms`, which avoids
+  the scientific-notation rendering (`7.09e-05`) that `duration_s` produces
+  for sub-millisecond scopes. (Dogfood wart #4.)
+- **`ShieldOpsInterceptor.from_env()` one-shot startup banner** —
+  `logger.info("shieldops.interceptor.from_env mode=… telemetry=… api_key=set|unset")`
+  is emitted once per `from_env()` call so silent misconfigs are visible at
+  app boot without forcing `strict=True`. Direct `ShieldOpsInterceptor(config)`
+  construction stays silent. The `api_key` value is never logged. (Dogfood
+  wart #3.)
+- **`@interceptor.guard()` unguardable-tool_name `UserWarning`** —
+  emitted at decoration time when the resolved `tool_name` is not in
+  `effective_blocked_patterns | effective_high_risk_patterns` AND no
+  `extra_*_patterns` are configured on the `ShieldOpsConfig`. Surfaces the
+  silent-no-op footgun documented in dogfood entry #1 (default
+  `tool_name = fn.__qualname__` is exact-match, almost never lines up with
+  the bare-name patterns like `"drop_table"`). Suppressed when the user
+  has signalled custom policy via `extra_*_patterns`. (Dogfood wart #1.)
+
+### Internal
+
+- New `TestScopeStatsDurationMs`, `TestGuardUnknownToolNameWarning`,
+  `TestFromEnvBanner` test classes; 8 new tests (191 → 199 passing).
+- Existing decorator-mechanics test classes now use
+  `pytest.mark.filterwarnings("ignore:.*guard\\(\\) resolved tool_name.*:UserWarning")`
+  at the class level so they don't trip the new warning while exercising
+  decorator wiring.
+
 ## [0.1.2] - 2026-05-14
 
 First user-visible feature release. Three small additions that make

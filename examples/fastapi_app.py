@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""Example: FastAPI app showcasing shieldops-sdk 0.1.2 features.
+"""Example: FastAPI app showcasing shieldops-sdk 0.1.3 features.
 
-Demonstrates the three user-visible 0.1.2 surfaces end-to-end:
+Demonstrates the three user-visible 0.1.2 surfaces end-to-end (with the
+0.1.3 ergonomics polish applied — see scope shape and from_env startup
+banner below):
 
     1. ``ShieldOpsInterceptor.from_env()`` — one-liner factory from
        ``SHIELDOPS_*`` environment variables.
@@ -71,9 +73,9 @@ logger = logging.getLogger("shieldops_fastapi")
 interceptor = ShieldOpsInterceptor.from_env(strict=False)
 
 app = FastAPI(
-    title="ShieldOps SDK 0.1.2 Demo",
+    title="ShieldOps SDK 0.1.3 Demo",
     description="FastAPI demo of from_env() + @guard() + per-scope stats.",
-    version="0.1.2",
+    version="0.1.3",
 )
 
 # In-memory audit log (replace with a real database in production).
@@ -112,7 +114,9 @@ class DropTableRequest(BaseModel):
 # in the SDK's default policy lookup. The built-in blocked set keys on bare
 # names like "drop_table" / "delete_database"; without tool_name="drop_table"
 # the qualname "_drop_table" would not match and the deny path would never
-# fire.
+# fire. (SDK 0.1.3+ emits a UserWarning at decoration time when the resolved
+# tool_name does not match any default pattern and no extra_*_patterns are
+# configured — so this footgun surfaces at app boot, not silently in prod.)
 @interceptor.guard(tool_name="drop_table")
 async def _drop_table(table: str, db: str) -> dict[str, Any]:
     """Simulated destructive op gated by @guard().
@@ -243,7 +247,10 @@ async def batch_evaluate(tools: list[ToolExecuteRequest]) -> dict[str, Any]:
         "scope": {
             "calls": scope.calls,
             "denials": scope.denials,
-            "duration_s": scope.duration_s,
+            # 0.1.3: prefer duration_ms for human-readable telemetry. duration_s
+            # is still available but renders as scientific notation for
+            # sub-millisecond scopes (e.g. 7.09e-05).
+            "duration_ms": round(scope.duration_ms, 3),
             "mode": scope.mode,
         },
     }
@@ -273,7 +280,7 @@ async def health() -> dict[str, str]:
 if __name__ == "__main__":
     import uvicorn
 
-    print("ShieldOps SDK 0.1.2 demo")
+    print("ShieldOps SDK 0.1.3 demo")
     print(f"  mode      = {interceptor.stats['mode']}")
     print(f"  api_key   = {'set' if os.environ.get('SHIELDOPS_API_KEY') else 'unset'}")
     print(f"  telemetry = {os.environ.get('SHIELDOPS_TELEMETRY', 'local')}")

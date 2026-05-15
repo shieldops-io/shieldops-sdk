@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import warnings
+
 import pytest
 
 from shieldops_sdk.config import SDKMode, ShieldOpsConfig
@@ -231,8 +233,14 @@ class TestInterceptorContextManagerAsyncScope:
         assert scope.denials == 1
 
 
+@pytest.mark.filterwarnings("ignore:.*guard\\(\\) resolved tool_name.*:UserWarning")
 class TestInterceptorGuardDecoratorSync:
-    """`@interceptor.guard()` wraps a function with firewall interception (0.1.2)."""
+    """`@interceptor.guard()` wraps a function with firewall interception (0.1.2).
+
+    These tests intentionally decorate non-pattern functions to exercise
+    decorator mechanics. The 0.1.3 unguardable-tool_name UserWarning is
+    suppressed at the class level — it's covered by TestGuardUnknownToolNameWarning.
+    """
 
     def test_allows_safe_call_and_returns_value(self) -> None:
         interceptor = ShieldOpsInterceptor(ShieldOpsConfig(mode=SDKMode.AUDIT))
@@ -326,6 +334,7 @@ class TestInterceptorGuardDecoratorSync:
         assert seen == ["custom_tool_name"]
 
 
+@pytest.mark.filterwarnings("ignore:.*guard\\(\\) resolved tool_name.*:UserWarning")
 class TestInterceptorGuardDecoratorAsync:
     """`@interceptor.guard()` on `async def` dispatches to async_check (0.1.2)."""
 
@@ -373,6 +382,7 @@ class TestInterceptorGuardDecoratorAsync:
         assert seen == ["some_async_tool"]
 
 
+@pytest.mark.filterwarnings("ignore:.*guard\\(\\) resolved tool_name.*:UserWarning")
 class TestInterceptorGuardDecoratorMetadata:
     """The decorator preserves wrapped-function metadata (0.1.2)."""
 
@@ -397,3 +407,144 @@ class TestInterceptorGuardDecoratorMetadata:
 
         assert my_async_tool.__name__ == "my_async_tool"
         assert my_async_tool.__doc__ == "Async tool docstring."
+
+
+class TestScopeStatsDurationMs:
+    """ScopeStats exposes a duration_ms helper (0.1.3, dogfood wart #4)."""
+
+    def test_duration_ms_is_seconds_times_1000(self) -> None:
+        interceptor = ShieldOpsInterceptor(ShieldOpsConfig(mode=SDKMode.AUDIT))
+        with interceptor as scope:
+            interceptor.check("noop", {})
+        assert scope.duration_ms == pytest.approx(scope.duration_s * 1000.0)
+
+    def test_duration_ms_nonnegative(self) -> None:
+        interceptor = ShieldOpsInterceptor(ShieldOpsConfig(mode=SDKMode.AUDIT))
+        with interceptor as scope:
+            pass
+        assert scope.duration_ms >= 0.0
+
+
+class TestGuardUnknownToolNameWarning:
+    """@guard() warns when the resolved tool_name will never match policy (0.1.3, wart #1).
+
+    Reason: default ``tool_name = fn.__qualname__`` (e.g. ``Service.delete_user``)
+    is an exact-match lookup against ``effective_blocked_patterns |
+    effective_high_risk_patterns``. If the qualname doesn't appear in either
+    set AND the user hasn't configured ``extra_*_patterns``, the decorator is
+    a silent no-op — exactly the footgun documented in
+    ``docs/sdk/dogfood_0_1_2.md`` entry #1.
+    """
+
+    def test_unknown_qualname_emits_userwarning(self) -> None:
+        interceptor = ShieldOpsInterceptor(ShieldOpsConfig(mode=SDKMode.ENFORCE))
+
+        with pytest.warns(UserWarning, match="does not match"):
+
+            @interceptor.guard()
+            def _drop_table_silently(db: str) -> None:  # noqa: ARG001
+                return None
+
+    def test_warning_hints_at_explicit_tool_name(self) -> None:
+        interceptor = ShieldOpsInterceptor(ShieldOpsConfig(mode=SDKMode.ENFORCE))
+
+        with pytest.warns(UserWarning) as recorded:
+
+            @interceptor.guard()
+            def my_custom_op() -> None:
+                return None
+
+        assert any("tool_name=" in str(w.message) for w in recorded)
+
+    def test_no_warning_when_extras_configured(self) -> None:
+        # User signalled custom policy via extras — assume they know what
+        # they're doing, suppress the heuristic warning.
+        config = ShieldOpsConfig(
+            mode=SDKMode.ENFORCE,
+            extra_blocked_patterns={"_drop_table_with_extras"},
+        )
+        interceptor = ShieldOpsInterceptor(config)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")  # any UserWarning would raise
+
+            @interceptor.guard()
+            def my_unknown_op() -> None:
+                return None
+
+    def test_no_warning_when_extra_high_risk_configured(self) -> None:
+        config = ShieldOpsConfig(
+            mode=SDKMode.ENFORCE,
+            extra_high_risk_patterns={"sensitive_op"},
+        )
+        interceptor = ShieldOpsInterceptor(config)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+
+            @interceptor.guard()
+            def something_unknown() -> None:
+                return None
+
+    def test_no_warning_when_explicit_tool_name_matches_pattern(self) -> None:
+        interceptor = ShieldOpsInterceptor(ShieldOpsConfig(mode=SDKMode.ENFORCE))
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+
+            @interceptor.guard(tool_name="drop_table")
+            def _drop_table_func(db: str) -> None:  # noqa: ARG001
+                return None
+
+
+class TestFromEnvBanner:
+    """``ShieldOpsInterceptor.from_env()`` logs a one-shot config banner (0.1.3, wart #3)."""
+
+    def test_banner_logged_with_unset_api_key(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        for var in ("SHIELDOPS_API_KEY", "SHIELDOPS_MODE", "SHIELDOPS_TELEMETRY"):
+            monkeypatch.delenv(var, raising=False)
+
+        with caplog.at_level("INFO", logger="shieldops_sdk"):
+            ShieldOpsInterceptor.from_env()
+
+        banners = [r for r in caplog.records if "shieldops.interceptor.from_env" in r.message]
+        assert len(banners) == 1
+        msg = banners[0].message
+        assert "mode=audit" in msg
+        assert "telemetry=local" in msg
+        assert "api_key=unset" in msg
+
+    def test_banner_shows_api_key_set_when_present(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        monkeypatch.setenv("SHIELDOPS_API_KEY", "sk-test-123")
+        monkeypatch.delenv("SHIELDOPS_MODE", raising=False)
+        monkeypatch.delenv("SHIELDOPS_TELEMETRY", raising=False)
+
+        with caplog.at_level("INFO", logger="shieldops_sdk"):
+            ShieldOpsInterceptor.from_env()
+
+        banners = [r for r in caplog.records if "shieldops.interceptor.from_env" in r.message]
+        assert len(banners) == 1
+        msg = banners[0].message
+        assert "api_key=set" in msg
+        assert "sk-test-123" not in msg  # never leak the key
+
+    def test_direct_init_does_not_emit_banner(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        # Construct via the normal __init__ path — no banner. The banner is
+        # specific to the from_env() classmethod, where misconfigs are most
+        # likely to slip through.
+        with caplog.at_level("INFO", logger="shieldops_sdk"):
+            ShieldOpsInterceptor(ShieldOpsConfig(mode=SDKMode.AUDIT))
+
+        banners = [r for r in caplog.records if "shieldops.interceptor.from_env" in r.message]
+        assert banners == []
