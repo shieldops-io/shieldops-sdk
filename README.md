@@ -36,6 +36,67 @@ decision = interceptor.check("delete_database", {"db": "users"})
 - **No API key required** — the SDK never tries to reach `api.shieldops.io` unless you explicitly opt in.
 - **AUDIT mode (default)** observes every call without blocking; **ENFORCE mode** raises `ShieldOpsDeniedError` on policy violations.
 
+## Common patterns (0.1.2+)
+
+### Build from environment variables
+
+```python
+from shieldops_sdk import ShieldOpsInterceptor
+
+# Reads SHIELDOPS_API_KEY, SHIELDOPS_ENDPOINT, SHIELDOPS_MODE,
+# SHIELDOPS_TELEMETRY — any kwargs override env values.
+interceptor = ShieldOpsInterceptor.from_env()
+```
+
+For production deploys that should fail loud on misconfig, opt into strict validation:
+
+```python
+from shieldops_sdk import ShieldOpsInterceptor, ShieldOpsConfigError
+
+try:
+    interceptor = ShieldOpsInterceptor.from_env(strict=True)
+except ShieldOpsConfigError as exc:
+    # Raised on: unparseable SHIELDOPS_MODE / SHIELDOPS_TELEMETRY,
+    # telemetry=REMOTE without api_key, unrecognized SHIELDOPS_* env var.
+    raise SystemExit(f"shieldops misconfig: {exc}") from exc
+```
+
+### Wrap a function with the firewall
+
+```python
+from shieldops_sdk import ShieldOpsInterceptor
+
+interceptor = ShieldOpsInterceptor.from_env()
+
+@interceptor.guard(tool_name="delete_user")
+def delete_user(user_id: int, db: str) -> None:
+    ...
+
+# In ENFORCE mode, a denied call raises ShieldOpsDeniedError before
+# the wrapped function runs. In AUDIT mode, the wrapped function
+# always runs and the decision is just observed.
+delete_user(user_id=42, db="prod")
+```
+
+The decorator works on both sync and `async def` functions (auto-detected). Positional and keyword arguments are bound to parameter names via `inspect.signature.bind`, so the args dict passed to the policy check is consistent regardless of how the caller invoked the function. `tool_name` defaults to `fn.__qualname__`; pass an explicit name when wiring against the SDK's built-in policy keywords (which are exact-match).
+
+### Per-scope stats with the context manager
+
+```python
+from shieldops_sdk import ShieldOpsInterceptor
+
+interceptor = ShieldOpsInterceptor.from_env()
+
+with interceptor as scope:
+    interceptor.check("safe_read", {"table": "users"})
+    interceptor.check("safe_write", {"table": "audit"})
+
+print(f"{scope.calls} call(s), {scope.denials} denial(s) in {scope.duration_s:.3f}s")
+# -> 2 call(s), 0 denial(s) in 0.001s
+```
+
+The ctx mgr yields a `ScopeStats { calls, denials, duration_s, mode }` populated on exit — useful for per-request audit in long-running services. Same shape with `async with`. The cumulative `interceptor.stats` dict still tracks across all scopes.
+
 ## Connected mode (opt-in remote telemetry)
 
 ```python
@@ -144,6 +205,7 @@ If you depend on these, pin a specific SDK version. Stable integrations live und
 | `SHIELDOPS_API_KEY` | `""` | API key for authentication (only required for `REMOTE` telemetry) |
 | `SHIELDOPS_ENDPOINT` | `https://api.shieldops.io` | ShieldOps backend URL |
 | `SHIELDOPS_MODE` | `audit` | `audit` (log only) or `enforce` (block risky calls) |
+| `SHIELDOPS_TELEMETRY` | `local` | `local` (in-process), `remote` (POST to backend), or `otlp` (route to OTel collector) |
 
 See the [Configuration Guide](./docs/configuration.md) for the full list.
 
