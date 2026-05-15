@@ -36,7 +36,7 @@ decision = interceptor.check("delete_database", {"db": "users"})
 - **No API key required** — the SDK never tries to reach `api.shieldops.io` unless you explicitly opt in.
 - **AUDIT mode (default)** observes every call without blocking; **ENFORCE mode** raises `ShieldOpsDeniedError` on policy violations.
 
-## Common patterns (0.1.2+)
+## Common patterns (0.1.2+, ergonomics polish in 0.1.3)
 
 ### Build from environment variables
 
@@ -47,6 +47,8 @@ from shieldops_sdk import ShieldOpsInterceptor
 # SHIELDOPS_TELEMETRY — any kwargs override env values.
 interceptor = ShieldOpsInterceptor.from_env()
 ```
+
+Since 0.1.3, `from_env()` emits a one-shot `logger.info` banner at construction (`shieldops.interceptor.from_env mode=… telemetry=… api_key=set|unset`) so silent misconfigs surface at app boot without forcing `strict=True`. The api_key value itself is never logged. Direct `ShieldOpsInterceptor(config)` construction stays silent.
 
 For production deploys that should fail loud on misconfig, opt into strict validation:
 
@@ -80,6 +82,8 @@ delete_user(user_id=42, db="prod")
 
 The decorator works on both sync and `async def` functions (auto-detected). Positional and keyword arguments are bound to parameter names via `inspect.signature.bind`, so the args dict passed to the policy check is consistent regardless of how the caller invoked the function. `tool_name` defaults to `fn.__qualname__`; pass an explicit name when wiring against the SDK's built-in policy keywords (which are exact-match).
 
+Since 0.1.3, `@guard()` emits a `UserWarning` at decoration time when the resolved `tool_name` is not in the default blocked/high-risk pattern sets AND no `extra_*_patterns` are configured on the `ShieldOpsConfig` — surfaces the silent-no-op footgun at app boot rather than under prod traffic. Pass `tool_name="<policy-key>"` explicitly, or add the name to `ShieldOpsConfig(extra_blocked_patterns=...)`, to silence.
+
 ### Per-scope stats with the context manager
 
 ```python
@@ -91,11 +95,14 @@ with interceptor as scope:
     interceptor.check("safe_read", {"table": "users"})
     interceptor.check("safe_write", {"table": "audit"})
 
-print(f"{scope.calls} call(s), {scope.denials} denial(s) in {scope.duration_s:.3f}s")
-# -> 2 call(s), 0 denial(s) in 0.001s
+# 0.1.3+: duration_ms is friendlier for human-readable telemetry than the
+# raw duration_s float, which renders as scientific notation (7.09e-05)
+# for sub-millisecond scopes. duration_s is retained for back-compat.
+print(f"{scope.calls} call(s), {scope.denials} denial(s) in {scope.duration_ms:.3f}ms")
+# -> 2 call(s), 0 denial(s) in 0.812ms
 ```
 
-The ctx mgr yields a `ScopeStats { calls, denials, duration_s, mode }` populated on exit — useful for per-request audit in long-running services. Same shape with `async with`. The cumulative `interceptor.stats` dict still tracks across all scopes.
+The ctx mgr yields a `ScopeStats { calls, denials, duration_s, duration_ms, mode }` populated on exit — useful for per-request audit in long-running services. Same shape with `async with`. The cumulative `interceptor.stats` dict still tracks across all scopes.
 
 ## Connected mode (opt-in remote telemetry)
 
