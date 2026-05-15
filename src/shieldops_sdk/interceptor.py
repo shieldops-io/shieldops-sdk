@@ -199,6 +199,7 @@ class ShieldOpsInterceptor:
                 tool_name=tool_name,
                 reasons=reasons,
                 risk_score=risk_score,
+                request_id=decision.request_id,
             )
 
         return decision
@@ -246,6 +247,7 @@ class ShieldOpsInterceptor:
                         tool_name=tool_name,
                         reasons=decision.reasons,
                         risk_score=decision.risk_score,
+                        request_id=decision.request_id,
                     )
                 return decision
         except (httpx.HTTPError, httpx.TimeoutException) as exc:

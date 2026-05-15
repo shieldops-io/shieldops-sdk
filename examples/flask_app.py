@@ -44,7 +44,7 @@ import time
 from typing import Any
 
 try:
-    from flask import Flask, abort, jsonify, request
+    from flask import Flask, jsonify, request
 except ImportError as _imp_err:
     raise SystemExit(
         "Flask is required for this example.\nInstall it with: pip install flask"
@@ -129,15 +129,12 @@ def execute_tool() -> Any:
             }
         )
         audit_log.append(entry)
-        abort(
-            403,
-            description={
-                "tool_name": tool_name,
-                "action": "deny",
-                "risk_score": exc.risk_score,
-                "reasons": exc.reasons,
-            },
-        )
+        # 0.1.4+: exc.to_dict() is the canonical denial payload — same
+        # 4-field shape across FastAPI / Flask / CrewAI. Skip Flask's
+        # abort()-then-render-HTML path and return JSON directly so the
+        # body is a real {"action":"deny",...} object, not a stringified
+        # dict inside an HTML error page.
+        return jsonify(exc.to_dict()), 403
 
 
 @app.post("/api/tools/drop_table")
@@ -149,14 +146,7 @@ def drop_table_route() -> Any:
     try:
         return jsonify(_drop_table(table=table, db=db))
     except ShieldOpsDeniedError as exc:
-        abort(
-            403,
-            description={
-                "action": "deny",
-                "risk_score": exc.risk_score,
-                "reasons": exc.reasons,
-            },
-        )
+        return jsonify(exc.to_dict()), 403
 
 
 @app.post("/api/tools/batch")

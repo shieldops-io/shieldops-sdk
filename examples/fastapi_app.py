@@ -174,15 +174,11 @@ async def execute_tool(req: ToolExecuteRequest) -> ToolExecuteResponse:
             }
         )
         audit_log.append(entry)
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "tool_name": req.tool_name,
-                "action": "deny",
-                "risk_score": exc.risk_score,
-                "reasons": exc.reasons,
-            },
-        ) from exc
+        # 0.1.4+: exc.to_dict() locks the same denial shape used by the
+        # Flask and CrewAI examples — adapters no longer hand-roll the
+        # 4-field conversion. ``request_id`` is included automatically
+        # when the exception originated from interceptor.check.
+        raise HTTPException(status_code=403, detail=exc.to_dict()) from exc
 
 
 @app.post("/api/tools/drop_table")
@@ -196,14 +192,7 @@ async def drop_table_route(req: DropTableRequest) -> dict[str, Any]:
     try:
         return await _drop_table(table=req.table, db=req.db)
     except ShieldOpsDeniedError as exc:
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "action": "deny",
-                "risk_score": exc.risk_score,
-                "reasons": exc.reasons,
-            },
-        ) from exc
+        raise HTTPException(status_code=403, detail=exc.to_dict()) from exc
 
 
 @app.post("/api/tools/batch")

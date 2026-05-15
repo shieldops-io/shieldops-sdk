@@ -9,7 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`ShieldOpsDeniedError.to_dict()`** — canonical denial payload helper.
+  Returns a JSON-serialisable dict with `tool_name`, `action="deny"`,
+  `risk_score`, `reasons`, and (when set) `request_id`. Lets HTTP adapters
+  emit the same 4-or-5-field shape across FastAPI, Flask, and CrewAI
+  instead of each hand-rolling the conversion. Closes dogfood wart #6 once
+  the CrewAI spike confirmed cross-framework reproduction.
+- **`ShieldOpsDeniedError.request_id`** field. The interceptor now plumbs
+  the Decision's `request_id` through to the exception (both `check` and
+  `async_check` paths) for end-to-end trace correlation. Direct
+  `ShieldOpsDeniedError(...)` construction without `request_id` keeps the
+  legacy behaviour — the field stays empty and is omitted from
+  `to_dict()` output.
+- **`sdk/examples/crewai_app.py`** — CrewAI `BaseTool` subclass that
+  re-raises `ShieldOpsDeniedError` as a `RuntimeError(json.dumps(exc.to_dict()))`.
+  Doubles as the cross-framework parity proof.
+
 ### Changed
+
+- `sdk/examples/flask_app.py` and `sdk/examples/fastapi_app.py` now call
+  `exc.to_dict()` instead of hand-rolling the denial body. The Flask demo
+  also stops using `abort()` (which renders the dict as a stringified
+  HTML body) in favour of `return jsonify(exc.to_dict()), 403`.
 
 ### Fixed
 

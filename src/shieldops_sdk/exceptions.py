@@ -78,6 +78,8 @@ class ShieldOpsDeniedError(ShieldOpsError):
         tool_name: The tool that was denied.
         reasons: List of policy violation reasons.
         risk_score: The computed risk score for the tool call.
+        request_id: Decision request id for trace correlation; empty when
+            the exception is raised outside the interceptor.check path.
     """
 
     def __init__(
@@ -85,12 +87,45 @@ class ShieldOpsDeniedError(ShieldOpsError):
         tool_name: str = "",
         reasons: list[str] | None = None,
         risk_score: float = 0.0,
+        request_id: str = "",
     ) -> None:
         self.tool_name = tool_name
-        self.reasons = reasons or []
+        self.reasons = list(reasons) if reasons else []
         self.risk_score = risk_score
+        self.request_id = request_id
         detail = f"Tool '{tool_name}' denied: {', '.join(self.reasons)}"
         super().__init__(detail, status_code=403)
+
+    def to_dict(self) -> dict[str, object]:
+        """Return the canonical denial payload as a JSON-serialisable dict.
+
+        Shape is locked here so HTTP adapters (Flask, FastAPI, CrewAI tool
+        wrappers, LangChain callbacks) emit identical JSON instead of each
+        hand-rolling their own conversion. Typical use::
+
+            try:
+                interceptor.check(...)
+            except ShieldOpsDeniedError as exc:
+                return jsonify(exc.to_dict()), 403  # Flask
+                # HTTPException(status_code=403, detail=exc.to_dict())  # FastAPI
+
+        The returned dict contains plain Python primitives (str, float,
+        list[str]); ``json.dumps`` round-trips it without a custom encoder.
+
+        ``request_id`` is included only when set (i.e. when the exception
+        originated inside ``interceptor.check`` / ``async_check``), so
+        callers that construct the exception directly keep the historical
+        4-field shape.
+        """
+        payload: dict[str, object] = {
+            "tool_name": self.tool_name,
+            "action": "deny",
+            "risk_score": self.risk_score,
+            "reasons": list(self.reasons),
+        }
+        if self.request_id:
+            payload["request_id"] = self.request_id
+        return payload
 
 
 class ShieldOpsConnectionError(ShieldOpsError):
