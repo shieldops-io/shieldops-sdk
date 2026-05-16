@@ -19,6 +19,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.1.5] - 2026-05-16
+
+Ergonomics-only follow-on to `0.1.4`. No breaking changes. Closes the
+last open dogfood paper-cut (wart #5) — promoted out of the
+hold-on-external-signal bucket because pytest suites sharing a
+module-level interceptor were hitting it on every refresh.
+
+### Added
+
+- **`ShieldOpsInterceptor.reset_stats()`** — zero the lifetime
+  `total_calls` and `total_denials` counters without re-instantiating
+  the interceptor or `importlib.reload`-ing its module. Touches
+  counters only; policy, config, and mode are preserved. Active
+  `with` / `async with` scopes are unaffected (ScopeStats snapshots
+  baselines on entry). Closes dogfood wart #5 — the documented pattern
+  is `interceptor.reset_stats()` in pytest `setup_method` / fixture
+  teardown.
+
+### Internal
+
+- 5 new tests in `TestResetStats` (idempotent, mode-preserving,
+  scope-aware, deny-count clearing); 212 → 217 passing.
+
 ## [0.1.4] - 2026-05-15
 
 Cross-framework parity release. Closes dogfood wart #6 once the CrewAI

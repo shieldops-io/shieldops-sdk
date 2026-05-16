@@ -267,6 +267,20 @@ class ShieldOpsInterceptor:
             "mode": self._config.mode.value,
         }
 
+    def reset_stats(self) -> None:
+        """Zero the lifetime counters (``total_calls`` and ``total_denials``).
+
+        Useful in pytest suites that share a module-level interceptor and
+        want clean stats between tests without re-instantiating the
+        interceptor or reloading its module. Does not touch policy,
+        config, or mode — only the running counters. Active ``with``
+        / ``async with`` scopes are unaffected by reset because
+        ``ScopeStats`` snapshots ``_start_calls``/``_start_denials`` on
+        scope entry; resetting between scopes is the documented pattern.
+        """
+        self._call_count = 0
+        self._deny_count = 0
+
     def _warn_if_unguardable(self, resolved_name: str) -> None:
         """Warn at decoration time when @guard() will be a silent no-op.
 

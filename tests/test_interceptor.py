@@ -548,3 +548,63 @@ class TestFromEnvBanner:
 
         banners = [r for r in caplog.records if "shieldops.interceptor.from_env" in r.message]
         assert banners == []
+
+
+class TestResetStats:
+    """``ShieldOpsInterceptor.reset_stats()`` zeros lifetime counters (0.1.5, dogfood wart #5).
+
+    Use case: pytest suites that need clean lifetime stats between
+    tests without instantiating a fresh interceptor (or `importlib.reload`-ing
+    the module that owns the singleton).
+    """
+
+    def test_reset_zeros_call_count(self) -> None:
+        ix = ShieldOpsInterceptor(ShieldOpsConfig(mode=SDKMode.AUDIT))
+        ix.check("noop", {})
+        ix.check("noop", {})
+        assert ix.stats["total_calls"] == 2
+        ix.reset_stats()
+        assert ix.stats["total_calls"] == 0
+
+    def test_reset_zeros_deny_count(self) -> None:
+        ix = ShieldOpsInterceptor(ShieldOpsConfig(mode=SDKMode.ENFORCE))
+        with pytest.raises(ShieldOpsDeniedError):
+            ix.check("drop_table", {"db": "users"})
+        assert ix.stats["total_denials"] == 1
+        ix.reset_stats()
+        assert ix.stats["total_denials"] == 0
+        assert ix.stats["total_calls"] == 0
+
+    def test_reset_is_idempotent(self) -> None:
+        # Multiple resets in a row stay at zero; reset on a fresh
+        # interceptor (counters already zero) is a no-op, not an error.
+        ix = ShieldOpsInterceptor(ShieldOpsConfig(mode=SDKMode.AUDIT))
+        ix.reset_stats()
+        ix.reset_stats()
+        assert ix.stats["total_calls"] == 0
+        ix.check("noop", {})
+        ix.reset_stats()
+        ix.reset_stats()
+        assert ix.stats["total_calls"] == 0
+
+    def test_reset_does_not_alter_mode_or_config(self) -> None:
+        # Defensive: reset_stats touches counters only, never policy.
+        ix = ShieldOpsInterceptor(ShieldOpsConfig(mode=SDKMode.ENFORCE))
+        ix.check("safe_op", {})
+        assert ix.stats["mode"] == "enforce"
+        ix.reset_stats()
+        assert ix.stats["mode"] == "enforce"
+        # Policy still active after reset.
+        with pytest.raises(ShieldOpsDeniedError):
+            ix.check("drop_table", {"db": "users"})
+
+    def test_reset_then_new_scope_starts_fresh(self) -> None:
+        # After reset, a new ctx mgr scope sees zeroed lifetime baseline.
+        ix = ShieldOpsInterceptor(ShieldOpsConfig(mode=SDKMode.AUDIT))
+        ix.check("noop", {})
+        ix.check("noop", {})
+        ix.reset_stats()
+        with ix as scope:
+            ix.check("noop", {})
+        assert scope.calls == 1
+        assert ix.stats["total_calls"] == 1
