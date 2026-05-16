@@ -170,13 +170,9 @@ class ShieldOpsInterceptor:
 
         # Arg heuristics
         if args:
-            args_str = str(args).lower()
-            if "production" in args_str or "prod" in args_str:
-                risk_score = min(risk_score + 0.2, 1.0)
-                reasons.append("Arguments reference production environment")
-            if "wildcard" in args_str or "*" in args_str:
-                risk_score = min(risk_score + 0.1, 1.0)
-                reasons.append("Arguments contain wildcard patterns")
+            delta, extra_reasons = self._arg_heuristics(args)
+            risk_score = min(risk_score + delta, 1.0)
+            reasons.extend(extra_reasons)
 
         # Risk-threshold deny (0.1.6, wart #2). Fires when the cumulative
         # risk_score (pattern + arg heuristics) meets the configured
@@ -278,6 +274,28 @@ class ShieldOpsInterceptor:
             "total_denials": self._deny_count,
             "mode": self._config.mode.value,
         }
+
+    @staticmethod
+    def _arg_heuristics(args: dict[str, Any]) -> tuple[float, list[str]]:
+        """Scan tool args for risk-bumping signals.
+
+        Returns ``(delta, reasons)`` where ``delta`` is added to the
+        running risk_score (capped at 1.0 by the caller) and ``reasons``
+        is the list of human-readable contributors. Extracted from
+        ``check()`` in 0.1.7 to give the heuristics a single named
+        surface — easier to extend (e.g. customer-supplied scanners) and
+        easier to test in isolation.
+        """
+        args_str = str(args).lower()
+        delta = 0.0
+        reasons: list[str] = []
+        if "production" in args_str or "prod" in args_str:
+            delta += 0.2
+            reasons.append("Arguments reference production environment")
+        if "wildcard" in args_str or "*" in args_str:
+            delta += 0.1
+            reasons.append("Arguments contain wildcard patterns")
+        return delta, reasons
 
     def reset_stats(self) -> None:
         """Zero the lifetime counters (``total_calls`` and ``total_denials``).

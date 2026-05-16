@@ -19,6 +19,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.1.7] - 2026-05-16
+
+Post-dogfood-loop release. The 5 reproducible warts from
+`docs/sdk/dogfood_0_1_2.md` all shipped across 0.1.3–0.1.6; this
+release does three independent housekeeping items bundled together to
+amortise the operator-gate approval cost.
+
+### Added
+
+- **Stable `shieldops_sdk.integrations.autogen.ShieldOpsAutoGenWrapper`**
+  and **`shieldops_sdk.integrations.openai_agents.ShieldOpsOpenAIAgentsHandler`**.
+  Promoted out of `shieldops_sdk.experimental` after the surface stayed
+  stable across three minor releases. Importing the stable modules
+  emits zero warnings.
+- **`sdk/examples/langchain_app.py`** — fourth-framework spike for
+  dogfood wart #6 (FastAPI / Flask / CrewAI / LangChain all confirmed
+  emitting the canonical denial payload). Shows how to extract the
+  canonical `to_dict()` shape from `PermissionError.__cause__` inside
+  a `ShieldOpsCallbackHandler` consumer.
+
+### Changed
+
+- **`ShieldOpsInterceptor._arg_heuristics(args)`** extracted as a
+  private staticmethod. Pure refactor — same delta + reasons returned
+  as the inline scan; existing 225 tests are the fence. No observable
+  behaviour change.
+
+### Deprecated
+
+- `shieldops_sdk.experimental` package and the two submodules
+  (`experimental.autogen`, `experimental.openai_agents`) now emit
+  `DeprecationWarning` on import (was `UserWarning` in 0.1.0–0.1.6).
+  Both still re-export the stable classes from
+  `shieldops_sdk.integrations.*` so 0.1.6 user code keeps working
+  through the transition. Scheduled for removal in 0.2.0.
+
+### Internal
+
+- `test_experimental.py` rewritten to assert `DeprecationWarning`
+  (was `UserWarning`); added shim-coverage tests for both submodules
+  + a class-identity fence proving `experimental.X is integrations.X`.
+  New `test_promoted_integrations.py` (4 tests): stable imports emit
+  zero warnings, wrappers function end-to-end. 225 → 232 passing.
+
 ## [0.1.6] - 2026-05-16
 
 Closes the last open dogfood paper-cut (#2). All 5 reproducible warts
