@@ -143,3 +143,17 @@ class TestConfigProperties:
     def test_is_audit(self) -> None:
         assert ShieldOpsConfig(mode=SDKMode.AUDIT).is_audit is True
         assert ShieldOpsConfig(mode=SDKMode.AUDIT).is_enforce is False
+
+
+class TestDenyAboveDefault:
+    """``ShieldOpsConfig.deny_above`` defaults to 1.01 — effectively off (0.1.6, wart #2)."""
+
+    def test_default_is_just_above_one(self) -> None:
+        # risk_score clamps to [0, 1], so 1.01 is unreachable by design —
+        # makes the default behaviour identical to pre-0.1.6 (no
+        # threshold-driven denies, only pattern-match denies).
+        assert ShieldOpsConfig().deny_above == 1.01
+
+    def test_explicit_threshold_accepted(self) -> None:
+        cfg = ShieldOpsConfig(deny_above=0.5)
+        assert cfg.deny_above == 0.5

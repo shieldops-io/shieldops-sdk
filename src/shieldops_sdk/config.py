@@ -59,6 +59,20 @@ class ShieldOpsConfig(BaseModel):
         ),
     )
     timeout: float = Field(default=5.0, ge=0.1)
+    deny_above: float = Field(
+        default=1.01,
+        ge=0.0,
+        description=(
+            "Risk-score threshold for declarative deny in enforce mode. When "
+            "the computed risk_score (after pattern lookup + arg heuristics) "
+            "meets or exceeds this value AND mode == ENFORCE, the call is "
+            "denied even when the tool_name didn't match a blocked pattern. "
+            "Default 1.01 is unreachable by design (risk_score clamps to "
+            "[0, 1]) — same behaviour as pre-0.1.6, threshold-driven denies "
+            "are opt-in. Set to e.g. 0.7 to deny any call that hits the "
+            "production-arg or wildcard-arg heuristic in enforce mode."
+        ),
+    )
     extra_blocked_patterns: set[str] = Field(
         default_factory=set,
         description=(

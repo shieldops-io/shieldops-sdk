@@ -608,3 +608,68 @@ class TestResetStats:
             ix.check("noop", {})
         assert scope.calls == 1
         assert ix.stats["total_calls"] == 1
+
+
+class TestDenyAboveThreshold:
+    """``ShieldOpsConfig.deny_above`` enables declarative risk-threshold deny (0.1.6, wart #2).
+
+    Before 0.1.6 the production-arg / wildcard-arg heuristics could only
+    bump risk_score; the deny path was reachable solely through exact-match
+    blocked patterns. ``deny_above`` lets users opt into "any call whose
+    final risk_score crosses N is a deny" without writing custom policy.
+    """
+
+    def test_threshold_denies_safe_tool_with_prod_arg(self) -> None:
+        # 0.5 threshold + safe_tool + {"db": "prod"} → risk_score 0.2 from
+        # the prod heuristic alone would NOT cross 0.5. Use a high-risk
+        # tool to push risk to 0.7, then add prod for 0.9 → crosses 0.5.
+        cfg = ShieldOpsConfig(mode=SDKMode.ENFORCE, deny_above=0.5)
+        ix = ShieldOpsInterceptor(cfg)
+        with pytest.raises(ShieldOpsDeniedError) as exc_info:
+            ix.check("execute_command", {"db": "prod"})
+        assert exc_info.value.risk_score >= 0.5
+
+    def test_threshold_at_zero_denies_any_arg_bumped_call(self) -> None:
+        # deny_above=0.0 is the "deny on any heuristic flag" sledgehammer.
+        cfg = ShieldOpsConfig(mode=SDKMode.ENFORCE, deny_above=0.0)
+        ix = ShieldOpsInterceptor(cfg)
+        with pytest.raises(ShieldOpsDeniedError):
+            ix.check("safe_tool", {"env": "production"})
+
+    def test_no_threshold_default_allows_prod_heuristic(self) -> None:
+        # Default deny_above=1.01 → pre-0.1.6 behaviour: prod-heuristic
+        # bumps risk to 0.2 but action stays allow.
+        ix = ShieldOpsInterceptor(ShieldOpsConfig(mode=SDKMode.ENFORCE))
+        decision = ix.check("safe_tool", {"env": "production"})
+        assert decision.action == "allow"
+        assert decision.risk_score >= 0.2
+
+    def test_audit_mode_never_denies_regardless_of_threshold(self) -> None:
+        # Sledgehammer threshold + AUDIT must NOT deny. Audit's contract is
+        # "observe only" — threshold is a deny-path knob, period.
+        cfg = ShieldOpsConfig(mode=SDKMode.AUDIT, deny_above=0.0)
+        ix = ShieldOpsInterceptor(cfg)
+        decision = ix.check("execute_command", {"db": "prod"})
+        assert decision.action == "allow"
+        assert ix.stats["total_denials"] == 0
+
+    def test_pattern_deny_still_fires_with_high_threshold(self) -> None:
+        # Regression fence: pattern-matched deny path is independent of
+        # the threshold. drop_table must still deny in enforce even when
+        # deny_above is set to the unreachable default.
+        cfg = ShieldOpsConfig(mode=SDKMode.ENFORCE, deny_above=1.01)
+        ix = ShieldOpsInterceptor(cfg)
+        with pytest.raises(ShieldOpsDeniedError) as exc_info:
+            ix.check("drop_table", {"db": "users"})
+        # Pattern reason, not threshold reason
+        joined = " ".join(exc_info.value.reasons)
+        assert "blocked pattern" in joined
+        assert "deny threshold" not in joined
+
+    def test_threshold_denial_includes_reason_string(self) -> None:
+        cfg = ShieldOpsConfig(mode=SDKMode.ENFORCE, deny_above=0.5)
+        ix = ShieldOpsInterceptor(cfg)
+        with pytest.raises(ShieldOpsDeniedError) as exc_info:
+            ix.check("execute_command", {"db": "prod"})
+        payload = exc_info.value.to_dict()
+        assert any("deny threshold" in r for r in payload["reasons"]), payload

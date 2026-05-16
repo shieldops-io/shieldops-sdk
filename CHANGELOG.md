@@ -19,6 +19,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.1.6] - 2026-05-16
+
+Closes the last open dogfood paper-cut (#2). All 5 reproducible warts
+from `docs/sdk/dogfood_0_1_2.md` are now shipped; the friction journal
+is effectively closed.
+
+### Added
+
+- **`ShieldOpsConfig.deny_above: float`** (default `1.01`, unreachable by
+  design). Declarative risk-score threshold. When the cumulative
+  `risk_score` (pattern lookup + arg heuristics) meets or exceeds this
+  value AND `mode == ENFORCE`, the call is denied even when the
+  `tool_name` did not match a built-in blocked pattern. Default `1.01`
+  preserves pre-0.1.6 behaviour (risk_score clamps to `[0, 1]`, so the
+  threshold branch never fires). Set to e.g. `0.7` to deny any call
+  that hits the production-arg or wildcard-arg heuristics in enforce
+  mode. The deny reason includes `"Risk score X.XXX meets deny
+  threshold Y.YYY"` so audit consumers can distinguish pattern-driven
+  from threshold-driven denials.
+
+### Internal
+
+- 6 new tests across `TestDenyAboveDefault` (config) +
+  `TestDenyAboveThreshold` (interceptor): default, explicit value,
+  threshold deny, audit-mode independence, pattern-deny regression,
+  reason-string fence. 217 → 225 passing (8 cumulative with the +2
+  from config defaults overlap).
+
 ## [0.1.5] - 2026-05-16
 
 Ergonomics-only follow-on to `0.1.4`. No breaking changes. Closes the

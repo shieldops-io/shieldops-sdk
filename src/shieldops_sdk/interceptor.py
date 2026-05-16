@@ -178,6 +178,18 @@ class ShieldOpsInterceptor:
                 risk_score = min(risk_score + 0.1, 1.0)
                 reasons.append("Arguments contain wildcard patterns")
 
+        # Risk-threshold deny (0.1.6, wart #2). Fires when the cumulative
+        # risk_score (pattern + arg heuristics) meets the configured
+        # threshold AND we're in enforce mode AND we haven't already
+        # decided to deny via the pattern path above. Default threshold
+        # is 1.01 — unreachable, so this branch is opt-in only.
+        if action == "allow" and self._config.is_enforce and risk_score >= self._config.deny_above:
+            reasons.append(
+                f"Risk score {risk_score:.3f} meets deny threshold {self._config.deny_above:.3f}"
+            )
+            action = "deny"
+            self._deny_count += 1
+
         if not reasons:
             reasons.append("No policy violations detected")
 
