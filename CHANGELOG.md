@@ -19,6 +19,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.1.8] - 2026-05-16
+
+Three independent housekeeping items bundled to amortise the
+operator-gate approval cost (the `pypi` env still has
+`required_reviewers`, verified empirically post-0.1.7). No breaking
+changes.
+
+### Added
+
+- **`py.typed`** marker shipping with the wheel (PEP 561). Downstream
+  mypy / pyright / IDEs will start consuming the inline type hints
+  that already cover every public class and method. Locked in
+  `pyproject.toml` via an explicit `[tool.hatch.build.targets.wheel]
+  artifacts = [...]` rule so a future `packages=` refactor can't
+  silently drop it.
+- **`ShieldOpsCallbackHandler(payload_in_error=True)`** opt-in keyword
+  on the LangChain integration. When set, denied calls raise
+  `RuntimeError` whose `args[0]` is the canonical
+  `ShieldOpsDeniedError.to_dict()` JSON instead of the historic
+  `PermissionError("ShieldOps blocked tool '<name>'")` string. The
+  chained `ShieldOpsDeniedError` is preserved via `__cause__` in both
+  modes. Default is `False`, preserving 0.1.0–0.1.6 behaviour.
+- **`ShieldOpsInterceptor.add_arg_scanner(fn)`** public extension
+  point. Register a custom scanner `Callable[[dict[str, Any]],
+  tuple[float, list[str]]]` that runs alongside the built-in
+  production/wildcard heuristics. Lets users plug PII detection,
+  IAM-action detection, customer naming conventions, etc., without
+  subclassing. Scanners stack: deltas accumulate (clamped to 1.0),
+  reasons concatenate. Combines naturally with `deny_above` from 0.1.6
+  for threshold-driven denies on custom signals.
+
+### Changed
+
+- `ShieldOpsInterceptor.check()` arg-heuristics path now drives a
+  scanner chain (`self._arg_scanners`, seeded with the built-in
+  `_arg_heuristics`) instead of inlining the production/wildcard
+  scan. No observable behaviour change for callers that don't register
+  custom scanners.
+
+### Internal
+
+- 5 new tests in `TestAddArgScanner` (delta+reason, no-op, stacking,
+  cap-at-1.0, deny_above interaction); 3 new in `TestPayloadInError`
+  (back-compat default, opt-in payload, chained cause); 2 new in
+  `test_py_typed.py` (source-tree fence + importlib.resources fence).
+  232 → 242 passing (+10 net).
+
 ## [0.1.7] - 2026-05-16
 
 Post-dogfood-loop release. The 5 reproducible warts from

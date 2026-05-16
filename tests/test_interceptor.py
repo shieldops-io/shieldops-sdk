@@ -673,3 +673,82 @@ class TestDenyAboveThreshold:
             ix.check("execute_command", {"db": "prod"})
         payload = exc_info.value.to_dict()
         assert any("deny threshold" in r for r in payload["reasons"]), payload
+
+
+class TestAddArgScanner:
+    """``ShieldOpsInterceptor.add_arg_scanner(fn)`` registers a custom scanner (0.1.8).
+
+    Lets users plug their own risk-scoring heuristics (PII detection,
+    IAM-action detection, internal naming conventions, ...) without
+    subclassing the interceptor.
+    """
+
+    def test_scanner_contributes_delta_and_reason(self) -> None:
+        ix = ShieldOpsInterceptor(ShieldOpsConfig(mode=SDKMode.AUDIT))
+
+        def pii_scanner(args: dict[str, object]) -> tuple[float, list[str]]:
+            if any("ssn" in str(v).lower() for v in args.values()):
+                return 0.3, ["Arguments contain PII (SSN)"]
+            return 0.0, []
+
+        ix.add_arg_scanner(pii_scanner)
+        decision = ix.check("save_user", {"data": "ssn=123-45-6789"})
+        assert decision.risk_score >= 0.3
+        assert any("PII (SSN)" in r for r in decision.reasons)
+
+    def test_scanner_zero_delta_no_op(self) -> None:
+        ix = ShieldOpsInterceptor(ShieldOpsConfig(mode=SDKMode.AUDIT))
+
+        def harmless(args: dict[str, object]) -> tuple[float, list[str]]:
+            return 0.0, []
+
+        ix.add_arg_scanner(harmless)
+        decision = ix.check("safe_tool", {"x": 1})
+        assert decision.risk_score == 0.0
+
+    def test_multiple_scanners_stack(self) -> None:
+        ix = ShieldOpsInterceptor(ShieldOpsConfig(mode=SDKMode.AUDIT))
+
+        def s1(args: dict[str, object]) -> tuple[float, list[str]]:
+            return 0.1, ["s1 fired"]
+
+        def s2(args: dict[str, object]) -> tuple[float, list[str]]:
+            return 0.2, ["s2 fired"]
+
+        ix.add_arg_scanner(s1)
+        ix.add_arg_scanner(s2)
+        decision = ix.check("safe_tool", {"k": "v"})
+        # Built-in heuristic returns 0 for "v" (no prod/wildcard); custom
+        # scanners add 0.1 + 0.2 = 0.3.
+        assert decision.risk_score == pytest.approx(0.3)
+        joined = " ".join(decision.reasons)
+        assert "s1 fired" in joined
+        assert "s2 fired" in joined
+
+    def test_scanner_caps_risk_at_one(self) -> None:
+        ix = ShieldOpsInterceptor(ShieldOpsConfig(mode=SDKMode.AUDIT))
+
+        def heavy(args: dict[str, object]) -> tuple[float, list[str]]:
+            return 5.0, ["heavy scanner"]
+
+        ix.add_arg_scanner(heavy)
+        decision = ix.check("safe_tool", {"k": "v"})
+        # Risk should clamp to 1.0 regardless of scanner deltas.
+        assert decision.risk_score == 1.0
+
+    def test_scanner_can_trigger_deny_above_threshold(self) -> None:
+        # Custom scanner + deny_above lets users wire arbitrary policy.
+        cfg = ShieldOpsConfig(mode=SDKMode.ENFORCE, deny_above=0.5)
+        ix = ShieldOpsInterceptor(cfg)
+
+        def label_scanner(args: dict[str, object]) -> tuple[float, list[str]]:
+            if args.get("env") == "prod":
+                return 0.6, ["env=prod policy"]
+            return 0.0, []
+
+        ix.add_arg_scanner(label_scanner)
+        with pytest.raises(ShieldOpsDeniedError) as exc_info:
+            ix.check("safe_tool", {"env": "prod"})
+        payload = exc_info.value.to_dict()
+        assert any("env=prod policy" in r for r in payload["reasons"])
+        assert any("deny threshold" in r for r in payload["reasons"])

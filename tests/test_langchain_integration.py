@@ -173,3 +173,56 @@ class TestInputTruncation:
             )
             args_passed = mock_check.call_args[0][1]
             assert len(args_passed["input"]) == 1000
+
+
+class TestPayloadInError:
+    """``payload_in_error=True`` swaps PermissionError for RuntimeError(json) (0.1.8)."""
+
+    def test_default_false_preserves_permission_error_back_compat(self) -> None:
+        # 0.1.6 user code catching PermissionError must still work.
+        handler = ShieldOpsCallbackHandler(api_key="sk-test", mode="enforce")
+        with pytest.raises(PermissionError):
+            handler.on_tool_start(
+                serialized={"name": "delete_database"},
+                input_str="",
+                run_id="run-bc",
+            )
+
+    def test_opt_in_raises_runtime_error_with_canonical_payload(self) -> None:
+        import json
+
+        handler = ShieldOpsCallbackHandler(
+            api_key="sk-test",
+            mode="enforce",
+            payload_in_error=True,
+        )
+        with pytest.raises(RuntimeError) as exc_info:
+            handler.on_tool_start(
+                serialized={"name": "delete_database"},
+                input_str="",
+                run_id="run-opt",
+            )
+        # The RuntimeError's args[0] should be JSON-parseable canonical payload.
+        payload = json.loads(exc_info.value.args[0])
+        assert payload["action"] == "deny"
+        assert payload["tool_name"] == "delete_database"
+        assert payload["risk_score"] == 1.0
+        assert payload.get("request_id")
+
+    def test_opt_in_chains_original_denied_error(self) -> None:
+        # RuntimeError still chains the original ShieldOpsDeniedError so
+        # tooling can `raise … from` walk back to the root cause.
+        from shieldops_sdk.exceptions import ShieldOpsDeniedError
+
+        handler = ShieldOpsCallbackHandler(
+            api_key="sk-test",
+            mode="enforce",
+            payload_in_error=True,
+        )
+        with pytest.raises(RuntimeError) as exc_info:
+            handler.on_tool_start(
+                serialized={"name": "drop_table"},
+                input_str="",
+                run_id="run-chain",
+            )
+        assert isinstance(exc_info.value.__cause__, ShieldOpsDeniedError)

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "shieldops-sdk"
-version = "0.1.7"
+version = "0.1.8"
 description = "AI Security Control Plane SDK — intercept and govern AI agent tool calls"
 readme = "README.md"
 license = "Apache-2.0"
@@ -63,6 +63,10 @@ Changelog = "https://github.com/shieldops-io/shieldops-sdk/blob/main/CHANGELOG.m
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/shieldops_sdk"]
+# Explicit include for the PEP 561 marker so a future packages= refactor
+# can't silently drop it. Without py.typed in the wheel, downstream
+# mypy/pyright treats every shieldops_sdk import as Any.
+artifacts = ["src/shieldops_sdk/py.typed"]
 
 [tool.hatch.build.targets.sdist]
 exclude = [

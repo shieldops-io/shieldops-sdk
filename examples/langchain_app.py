@@ -49,6 +49,22 @@ def _spike_callback_deny() -> dict[str, Any]:
     Equivalent to what a custom LangChain callback subclass would do
     if it wanted to forward the structured payload upstream instead
     of the default PermissionError string.
+
+    Two ways to get the canonical 5-field payload in 0.1.8+:
+
+    1. **Default (back-compat with 0.1.0–0.1.6):**
+       ``ShieldOpsCallbackHandler(mode='enforce')`` raises
+       ``PermissionError(...)``; reach through ``exc.__cause__`` to
+       get the chained ``ShieldOpsDeniedError`` and call ``to_dict()``.
+
+    2. **Opt-in payload-in-error (0.1.8+):**
+       ``ShieldOpsCallbackHandler(mode='enforce', payload_in_error=True)``
+       raises ``RuntimeError`` whose ``args[0]`` IS the canonical
+       JSON payload. Cleaner for agents that want the structured
+       shape upstream without the indirection.
+
+    This spike uses path #1 to keep the demo compatible with 0.1.6
+    user code; path #2 is shown in the documentation comment below.
     """
     handler = ShieldOpsCallbackHandler(mode=os.environ.get("SHIELDOPS_MODE", "audit"))
     serialized = {"name": "drop_table", "id": ["shieldops", "drop_table"]}
@@ -64,6 +80,22 @@ def _spike_callback_deny() -> dict[str, Any]:
     return {"action": "allow"}
 
 
+def _spike_callback_deny_optin_payload() -> dict[str, Any]:
+    """0.1.8+ opt-in: payload_in_error=True raises RuntimeError(json)."""
+    handler = ShieldOpsCallbackHandler(
+        mode=os.environ.get("SHIELDOPS_MODE", "audit"),
+        payload_in_error=True,
+    )
+    try:
+        handler.on_tool_start(
+            {"name": "drop_table", "id": ["shieldops", "drop_table"]},
+            input_str="db=prod table=users",
+        )
+    except RuntimeError as exc:
+        return json.loads(exc.args[0])
+    return {"action": "allow"}
+
+
 if __name__ == "__main__":
     print("ShieldOps SDK — LangChain deny-payload spike")
     print(f"  mode      = {os.environ.get('SHIELDOPS_MODE', 'audit')}")
@@ -71,15 +103,20 @@ if __name__ == "__main__":
     print(f"  telemetry = {os.environ.get('SHIELDOPS_TELEMETRY', 'local')}")
 
     payload = _spike_callback_deny()
-    print("\nDenial payload (canonical shape — same as FastAPI/Flask/CrewAI):")
+    print("\nDenial payload (back-compat path — exc.__cause__.to_dict()):")
     print(json.dumps(payload, indent=2))
+
+    optin_payload = _spike_callback_deny_optin_payload()
+    print("\nDenial payload (0.1.8 opt-in — payload_in_error=True):")
+    print(json.dumps(optin_payload, indent=2))
 
     print(
         "\nLangChain wiring (for real usage with langchain installed):\n"
         "    pip install langchain langchain-core\n"
         "    from shieldops_sdk.integrations.langchain import ShieldOpsCallbackHandler\n"
+        "    # Default (back-compat with 0.1.0-0.1.6):\n"
         "    handler = ShieldOpsCallbackHandler(mode='enforce')\n"
+        "    # 0.1.8+: RuntimeError(json) instead of PermissionError(str):\n"
+        "    handler = ShieldOpsCallbackHandler(mode='enforce', payload_in_error=True)\n"
         "    agent.invoke({'input': '...'}, config={'callbacks': [handler]})\n"
-        "    # Denied calls raise PermissionError; access the canonical\n"
-        "    # payload via exc.__cause__.to_dict() in your error handler.\n"
     )

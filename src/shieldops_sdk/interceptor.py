@@ -101,6 +101,38 @@ class ShieldOpsInterceptor:
         self._high_risk_tools: set[str] = effective_high_risk_patterns(config)
         self._call_count: int = 0
         self._deny_count: int = 0
+        # Arg-scanner chain. 0.1.8: built-in scanner is the seed; users
+        # append their own via add_arg_scanner(). Order matters for the
+        # reasons list but not for the final risk_score (additive then
+        # clamped).
+        self._arg_scanners: list[Callable[[dict[str, Any]], tuple[float, list[str]]]] = [
+            self._arg_heuristics
+        ]
+
+    def add_arg_scanner(
+        self,
+        scanner: Callable[[dict[str, Any]], tuple[float, list[str]]],
+    ) -> None:
+        """Register a custom arg scanner.
+
+        ``scanner(args)`` must return ``(delta, reasons)`` where ``delta``
+        is added to the running ``risk_score`` (clamped to ``1.0`` by
+        ``check()``) and ``reasons`` is a list of human-readable
+        contributors. Built-in production/wildcard heuristics are always
+        applied first; user scanners run in the order they were added.
+
+        Useful for plugging in PII detection, IAM-action detection,
+        customer-specific naming conventions, etc., without subclassing
+        the interceptor. Example::
+
+            def pii_scanner(args):
+                if any("ssn" in str(v).lower() for v in args.values()):
+                    return 0.3, ["Arguments contain PII (SSN)"]
+                return 0.0, []
+
+            interceptor.add_arg_scanner(pii_scanner)
+        """
+        self._arg_scanners.append(scanner)
 
     @classmethod
     def from_env(cls, *, strict: bool = False, **overrides: Any) -> ShieldOpsInterceptor:
@@ -168,11 +200,15 @@ class ShieldOpsInterceptor:
             risk_score = 0.7
             reasons.append(f"Tool '{tool_name}' is high-risk")
 
-        # Arg heuristics
+        # Arg scanners — built-in heuristics first, then user-registered
+        # extensions (see add_arg_scanner). Each scanner returns
+        # (delta, reasons); deltas accumulate, reasons concatenate, final
+        # risk_score is clamped to 1.0.
         if args:
-            delta, extra_reasons = self._arg_heuristics(args)
-            risk_score = min(risk_score + delta, 1.0)
-            reasons.extend(extra_reasons)
+            for scanner in self._arg_scanners:
+                delta, extra_reasons = scanner(args)
+                risk_score = min(risk_score + delta, 1.0)
+                reasons.extend(extra_reasons)
 
         # Risk-threshold deny (0.1.6, wart #2). Fires when the cumulative
         # risk_score (pattern + arg heuristics) meets the configured
