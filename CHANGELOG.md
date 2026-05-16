@@ -19,6 +19,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.1.9] - 2026-05-16
+
+Release-pipeline fix. No SDK code behaviour changes — same public API
+as 0.1.8.
+
+### Changed
+
+- **SLSA L3 provenance pipeline migrated** from
+  `slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0`
+  to GitHub-native `actions/attest-build-provenance@v2`. Eliminates
+  the cosmetic-red `SLSA L3 provenance / final` job that hard-failed
+  on every prior release (0.1.0–0.1.8) even when provenance was
+  successfully generated and attached (locked rule #666 — now retired).
+  The new pipeline writes the SLSA v1 in-toto attestation to GitHub's
+  central attestation API instead of attaching `.intoto.jsonl` to the
+  GitHub Release.
+
+### Fixed
+
+- **`provenance` job re-added to `publish.needs`.** Now that the
+  attestation flow is clean, publish can correctly require provenance
+  generation as a precondition (proper SLSA semantics — no provenance,
+  no publish).
+
+### Internal
+
+- Release workflow `provenance:` job no longer uses a reusable
+  workflow caller; runs as a normal `runs-on: ubuntu-latest` job with
+  `permissions: { id-token: write, contents: write, attestations:
+  write }` and explicitly creates the draft GitHub Release for the
+  triggering tag (previously implicit via `slsa-generator
+  draft-release: true`).
+
+### Verification (for consumers of 0.1.9+)
+
+Prior releases attached `<artifact>.intoto.jsonl` to the GitHub
+Release; verify the bundled attestation file. Starting at 0.1.9,
+the attestation lives in GitHub's attestation API. Verify the wheel
+or sdist with:
+
+```bash
+pip download --no-deps shieldops-sdk==0.1.9 -d /tmp/dl
+gh attestation verify /tmp/dl/shieldops_sdk-0.1.9-*.whl --repo shieldops-io/shieldops-sdk
+```
+
+Functionally equivalent to the prior `.intoto.jsonl` verification.
+
 ## [0.1.8] - 2026-05-16
 
 Three independent housekeeping items bundled to amortise the

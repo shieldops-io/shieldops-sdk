@@ -191,37 +191,64 @@ jobs:
           name: sbom
           path: sbom.cdx.json
 
-  # ── 6. provenance (SLSA L3 via reusable workflow) ────────────────────
+  # ── 6. provenance (SLSA L3 via GitHub-native attest-build-provenance) ─
+  # 0.1.9: migrated from slsa-framework/slsa-github-generator (whose
+  # internal `final` reporter cosmetic-failed on v2.0.0 + v2.1.0 even
+  # when provenance generation succeeded — locked rule #666 in project
+  # memory). actions/attest-build-provenance@v2 is GitHub-native,
+  # produces an in-toto SLSA v1 attestation signed via Sigstore + the
+  # workflow's GitHub OIDC identity, and stores the attestation in
+  # GitHub's central attestation API. Verification model for users:
+  #   gh attestation verify <wheel-or-sdist> --repo shieldops-io/shieldops-sdk
+  # The previous `.intoto.jsonl` attachment on the GitHub Release is
+  # gone; the attestation lives in GitHub's API instead. Verification
+  # is functionally equivalent.
+  #
+  # slsa-github-generator used to create the draft Release implicitly
+  # (via draft-release: true). Without it we must create the Release
+  # explicitly so the operator's post-publish `gh release edit
+  # --draft=false --latest` has something to promote.
   provenance:
     name: SLSA L3 provenance
-    needs: build
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
     permissions:
-      id-token: write
-      contents: write
-      actions: read
-    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
-    with:
-      base64-subjects: ${{ needs.build.outputs.sdist_sha256 }} ${{ needs.build.outputs.wheel_sha256 }}
-      # SLSA's reusable workflow `final` job hard-fails when upload-assets is
-      # false (its SUCCESS output comes from the upload-assets outcome). The
-      # working combo is upload-assets=true + draft-release=true: SLSA creates
-      # a draft GitHub Release for the triggering tag if one doesn't exist
-      # yet and attaches the .intoto.jsonl. Step 8 of the playbook then
-      # promotes the draft via `gh release edit --draft=false`.
-      upload-assets: true
-      draft-release: true
+      id-token: write       # OIDC for Sigstore signing
+      contents: write       # for draft Release creation
+      attestations: write   # for actions/attest-build-provenance
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: dist
+          path: dist/
+      - name: Attest build provenance for sdist + wheel
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.whl
+      - name: Create draft GitHub Release for the tag
+        if: needs.prepare.outputs.is_rc == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            echo "Release ${GITHUB_REF_NAME} already exists; skipping create."
+          else
+            gh release create "${GITHUB_REF_NAME}" \
+              --draft \
+              --title "${GITHUB_REF_NAME}" \
+              --notes "Release ${GITHUB_REF_NAME}. SLSA L3 provenance signed via Sigstore + GitHub OIDC; verify with: gh attestation verify <wheel-or-sdist> --repo ${GITHUB_REPOSITORY}"
+          fi
 
   # ── 7. publish (PyPI Trusted Publishing) ─────────────────────────────
   publish:
     name: publish to ${{ needs.prepare.outputs.is_rc == 'true' && 'TestPyPI' || 'PyPI' }}
-    # NOTE: provenance is intentionally NOT in `needs`. slsa-github-generator
-    # v2.0.0+v2.1.0 both have a buggy `final` reporter job that hard-fails
-    # with SUCCESS=false even when upload-assets succeeds and the .intoto.jsonl
-    # is correctly attached to the draft Release. Keeping it in `needs` would
-    # cascade the cosmetic failure and skip publish. We still wait for
-    # `build` (we publish those artifacts) and `sbom` (so the SBOM job
-    # finishes before publish starts).
-    needs: [prepare, build, sbom]
+    # provenance is back in `needs` since the 0.1.9 migration off
+    # slsa-github-generator. actions/attest-build-provenance succeeds
+    # cleanly, so SLSA L3 attestation is now a hard precondition for
+    # publish — proper SLSA semantics (no provenance, no publish).
+    needs: [prepare, build, sbom, provenance]
     runs-on: ubuntu-latest
     environment:
       name: ${{ needs.prepare.outputs.is_rc == 'true' && 'testpypi' || 'pypi' }}
