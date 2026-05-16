@@ -217,6 +217,13 @@ jobs:
       contents: write       # for draft Release creation
       attestations: write   # for actions/attest-build-provenance
     steps:
+      # gh release create shells out to git for tag resolution; without a
+      # checkout the runner has no .git directory and the command fails
+      # with "fatal: not a git repository". This is a no-cost step
+      # because we don't need the working tree contents — only `.git/`.
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
       - uses: actions/download-artifact@v7
         with:
           name: dist
