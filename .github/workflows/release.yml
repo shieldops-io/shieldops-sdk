@@ -64,7 +64,7 @@ jobs:
       sdk_version: ${{ steps.resolve.outputs.sdk_version }}
       is_rc: ${{ steps.resolve.outputs.is_rc }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -102,7 +102,7 @@ jobs:
     needs: prepare
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -128,7 +128,7 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -149,7 +149,7 @@ jobs:
       sdist_sha256: ${{ steps.digest.outputs.sdist_sha256 }}
       wheel_sha256: ${{ steps.digest.outputs.wheel_sha256 }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -177,7 +177,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -221,7 +221,7 @@ jobs:
       # checkout the runner has no .git directory and the command fails
       # with "fatal: not a git repository". This is a no-cost step
       # because we don't need the working tree contents — only `.git/`.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 1
       - uses: actions/download-artifact@v7
