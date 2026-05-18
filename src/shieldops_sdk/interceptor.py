@@ -9,8 +9,8 @@ import logging
 import time
 import uuid
 import warnings
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass, field
 from typing import Any, TypeVar
 
 import httpx
@@ -77,6 +77,35 @@ class ScopeStats:
         return self.duration_s * 1000.0
 
 
+@dataclass
+class TaskScope(ScopeStats):
+    """Task-scoped capability boundary, yielded by ``ShieldOpsInterceptor.task()``.
+
+    Extends :class:`ScopeStats` with the operator-declared task name and the
+    allowed-tool whitelist. Tool calls inside the scope whose ``tool_name``
+    isn't in ``allowed_tools`` trigger goal-drift handling: deny in enforce
+    mode, log-and-allow in audit mode (see :class:`ShieldOpsInterceptor.check`).
+
+    The ``allowed_tools`` set is frozen at scope entry. Nested
+    ``interceptor.task()`` calls default to intersecting with the enclosing
+    scope (least-privilege); pass ``replace=True`` to swap the set instead.
+
+    Usage::
+
+        with interceptor.task("summarize_q3", allowed_tools={"fetch_url"}) as scope:
+            interceptor.check("fetch_url", {"url": "..."})     # allow
+            try:
+                interceptor.check("transfer_funds", {...})       # deny, drift=True
+            except ShieldOpsDeniedError as exc:
+                print(exc.to_dict())  # {..., "task": "summarize_q3", "drift": true}
+        assert scope.drift_count == 1
+    """
+
+    task: str = ""
+    allowed_tools: frozenset[str] = field(default_factory=frozenset)
+    drift_count: int = 0
+
+
 class ShieldOpsInterceptor:
     """Framework-agnostic tool call interceptor.
 
@@ -108,6 +137,12 @@ class ShieldOpsInterceptor:
         self._arg_scanners: list[Callable[[dict[str, Any]], tuple[float, list[str]]]] = [
             self._arg_heuristics
         ]
+        # 0.1.10: LIFO stack of active task scopes. Pushed by
+        # ``interceptor.task()`` __enter__/__aenter__; popped on exit. The
+        # innermost scope (stack[-1]) is consulted on every check() to
+        # enforce goal-drift (tool-not-in-allowed_tools => deny in enforce,
+        # log+allow in audit).
+        self._task_stack: list[TaskScope] = []
 
     def add_arg_scanner(
         self,
@@ -184,20 +219,50 @@ class ShieldOpsInterceptor:
         reasons: list[str] = []
         risk_score = 0.0
         action = "allow"
+        drift_detected = False
+        active_task_name: str | None = None
 
         normalized = tool_name.lower().strip()
+
+        # 0.1.10: Goal-drift check (structural, runs first). When an
+        # ``interceptor.task()`` scope is active and the tool isn't in its
+        # allowed_tools, treat as deny in enforce / log+allow in audit.
+        # Match is on the raw tool_name (case-sensitive) since operators
+        # declare allowed_tools as exact names; pattern matching uses the
+        # normalized form below independently.
+        if self._task_stack:
+            active = self._task_stack[-1]
+            active_task_name = active.task
+            if tool_name not in active.allowed_tools:
+                active.drift_count += 1
+                drift_detected = True
+                allowed_str = ", ".join(sorted(active.allowed_tools)) or "∅"
+                reasons.append(
+                    f"tool '{tool_name}' outside task scope "
+                    f"'{active.task}' (allowed: {allowed_str})"
+                )
+                risk_score = 1.0
+                if self._config.is_enforce:
+                    action = "deny"
+                    self._deny_count += 1
+                else:
+                    logger.info(
+                        "shieldops.interceptor.drift_audit tool=%s task=%s",
+                        tool_name,
+                        active.task,
+                    )
 
         # Check blocked patterns
         if normalized in self._blocked_tools:
             risk_score = 1.0
             reasons.append(f"Tool '{tool_name}' matches blocked pattern")
-            if self._config.is_enforce:
+            if self._config.is_enforce and action != "deny":
                 action = "deny"
                 self._deny_count += 1
 
         # Check high-risk patterns
         elif normalized in self._high_risk_tools:
-            risk_score = 0.7
+            risk_score = max(risk_score, 0.7)
             reasons.append(f"Tool '{tool_name}' is high-risk")
 
         # Arg scanners — built-in heuristics first, then user-registered
@@ -244,6 +309,8 @@ class ShieldOpsInterceptor:
                 reasons=reasons,
                 risk_score=risk_score,
                 request_id=decision.request_id,
+                task=active_task_name if drift_detected else None,
+                drift=drift_detected,
             )
 
         return decision
@@ -260,6 +327,14 @@ class ShieldOpsInterceptor:
         Falls back to local policy evaluation if the API is unreachable.
         """
         tool_call = ToolCall(tool_name=tool_name, args=args or {}, agent_id=agent_id)
+
+        # 0.1.10: Goal-drift is a client-side promise; the server doesn't
+        # know about task scopes. Short-circuit drift through the local
+        # check() before any network round-trip so off-task tool calls are
+        # denied immediately (enforce) or logged (audit) without spending a
+        # request on something we already know the answer to.
+        if self._task_stack and tool_name not in self._task_stack[-1].allowed_tools:
+            return self.check(tool_name, args, agent_id=agent_id)
 
         # Network POST requires BOTH telemetry=REMOTE and an api_key.
         # Otherwise we evaluate locally — block decision is independent of
@@ -484,3 +559,110 @@ class ShieldOpsInterceptor:
 
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         self._close_scope(self._async_scope)
+
+    # -- Task scope (0.1.10) ---------------------------------------------------
+    #
+    # interceptor.task("summarize_q3", allowed_tools={"fetch_url","read_doc"})
+    # returns a context manager that pushes a TaskScope onto self._task_stack
+    # on entry and pops it on exit. Tool calls inside the scope whose
+    # tool_name isn't in allowed_tools are denied (enforce) or logged (audit)
+    # via the drift hook in check().
+    #
+    # Nesting: by default the inner scope's allowed_tools is intersected with
+    # the enclosing scope's (least-privilege — a child can't expand what the
+    # parent forbade). Pass replace=True to swap the set instead, e.g. when a
+    # supervisor agent legitimately switches the active subtask.
+
+    def task(
+        self,
+        name: str,
+        *,
+        allowed_tools: Iterable[str],
+        replace: bool = False,
+    ) -> _TaskScopeManager:
+        """Bound the agent to a task scope.
+
+        Args:
+            name: Human-readable task identifier (becomes the ``task`` field
+                on the resulting :class:`TaskScope` and on any drift-triggered
+                :class:`ShieldOpsDeniedError`).
+            allowed_tools: Iterable of exact ``tool_name`` strings that are
+                permitted inside this scope. Frozen at entry. Tools outside
+                this set trigger goal-drift handling.
+            replace: When False (default) and the scope is nested inside an
+                outer ``task()``, the effective allowed-set is the
+                intersection of the two. When True, this scope's
+                ``allowed_tools`` fully replaces the parent's.
+
+        Returns:
+            A context manager usable as either ``with`` or ``async with``.
+            The yielded :class:`TaskScope` exposes per-scope stats including
+            ``drift_count``.
+        """
+        return _TaskScopeManager(self, name, allowed_tools, replace)
+
+
+class _TaskScopeManager:
+    """Sync- and async-compatible context manager for ``interceptor.task()``.
+
+    Lightweight wrapper that pushes/pops a :class:`TaskScope` on the
+    interceptor's ``_task_stack`` and finalises stats on exit. Constructed
+    via :meth:`ShieldOpsInterceptor.task` — not part of the public surface.
+    """
+
+    __slots__ = ("_interceptor", "_name", "_allowed", "_replace", "_scope")
+
+    def __init__(
+        self,
+        interceptor: ShieldOpsInterceptor,
+        name: str,
+        allowed_tools: Iterable[str],
+        replace: bool,
+    ) -> None:
+        self._interceptor = interceptor
+        self._name = name
+        self._allowed: frozenset[str] = frozenset(allowed_tools)
+        self._replace = replace
+        self._scope: TaskScope | None = None
+
+    def _enter(self) -> TaskScope:
+        stack = self._interceptor._task_stack
+        effective = self._allowed
+        if stack and not self._replace:
+            effective = effective & stack[-1].allowed_tools
+        scope = TaskScope(
+            _start_calls=self._interceptor._call_count,
+            _start_denials=self._interceptor._deny_count,
+            _start_time=time.monotonic(),
+            calls=0,
+            denials=0,
+            duration_s=0.0,
+            mode=self._interceptor._config.mode.value,
+            task=self._name,
+            allowed_tools=effective,
+            drift_count=0,
+        )
+        stack.append(scope)
+        self._scope = scope
+        return scope
+
+    def _exit(self) -> None:
+        if self._scope is None:
+            return
+        self._interceptor._close_scope(self._scope)
+        stack = self._interceptor._task_stack
+        if stack and stack[-1] is self._scope:
+            stack.pop()
+        self._scope = None
+
+    def __enter__(self) -> TaskScope:
+        return self._enter()
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        self._exit()
+
+    async def __aenter__(self) -> TaskScope:
+        return self._enter()
+
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        self._exit()

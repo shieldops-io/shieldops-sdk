@@ -19,6 +19,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.1.10] - 2026-05-18
+
+First-class goal-drift primitive — declarative task-scoped capability
+boundaries for agents. Closes the AGI-safety demo scenario (B): agent
+given task X attempts a tool outside the declared scope → deny with
+canonical drift payload.
+
+### Added
+
+- **`interceptor.task(name, allowed_tools=..., replace=False)`** —
+  context manager (sync `with` and async `async with`) that bounds an
+  agent's tool surface to an explicit allow-set. Tool calls outside
+  `allowed_tools` trigger goal-drift handling: deny in enforce mode,
+  log-and-allow in audit mode (matches existing audit semantics).
+  Nesting defaults to intersecting with the enclosing scope
+  (least-privilege); pass `replace=True` to swap instead.
+- **`TaskScope`** dataclass — yielded by `interceptor.task()`. Extends
+  `ScopeStats` with `task: str`, `allowed_tools: frozenset[str]`, and
+  `drift_count: int`. Exported from `shieldops_sdk`.
+- **`ShieldOpsDeniedError.task` + `.drift`** — populated when a deny
+  was triggered by goal-drift inside a `task()` scope. `to_dict()`
+  emits the two new fields only when meaningful, preserving the
+  4-field shape for callers that construct the exception directly or
+  hit a pattern/threshold deny.
+- **`sdk/examples/langchain_goal_drift.py`** — runnable 3-tool demo
+  (`fetch_url`, `read_doc`, `transfer_funds`) showing the AGI-safety
+  scenario end-to-end against a LangChain agent.
+
+### Changed
+
+- `async_check()` short-circuits goal-drift through `check()` before
+  any network round-trip. Drift is a client-side promise; the server
+  doesn't know about task scopes, so spending a request on a
+  known-off-scope tool call is wasted work.
+- `check()` blocked-pattern branch now guards `_deny_count` increment
+  with `action != "deny"` to prevent double-counting when both drift
+  and a pattern apply to the same call. High-risk-pattern `risk_score`
+  uses `max(risk_score, 0.7)` so a prior drift score of 1.0 is
+  preserved.
+
 ## [0.1.9] - 2026-05-16
 
 Release-pipeline fix. No SDK code behaviour changes — same public API

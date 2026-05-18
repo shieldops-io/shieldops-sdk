@@ -30,7 +30,13 @@ from shieldops_sdk.exceptions import (
     ShieldOpsError,
     ValidationError,
 )
-from shieldops_sdk.interceptor import Decision, ScopeStats, ShieldOpsInterceptor, ToolCall
+from shieldops_sdk.interceptor import (
+    Decision,
+    ScopeStats,
+    ShieldOpsInterceptor,
+    TaskScope,
+    ToolCall,
+)
 
 __all__ = [
     "AsyncShieldOpsClient",
@@ -48,7 +54,8 @@ __all__ = [
     "ShieldOpsDeniedError",
     "ShieldOpsError",
     "ShieldOpsInterceptor",
+    "TaskScope",
     "ToolCall",
     "ValidationError",
 ]
-__version__ = "0.1.9"
+__version__ = "0.1.10"

@@ -80,6 +80,11 @@ class ShieldOpsDeniedError(ShieldOpsError):
         risk_score: The computed risk score for the tool call.
         request_id: Decision request id for trace correlation; empty when
             the exception is raised outside the interceptor.check path.
+        task: Name of the active ``interceptor.task()`` scope when the
+            deny was triggered by goal drift, else ``None``.
+        drift: True iff the deny was triggered by the tool being outside
+            the active task scope's ``allowed_tools``. Pattern-only and
+            risk-threshold denies leave this False.
     """
 
     def __init__(
@@ -88,11 +93,15 @@ class ShieldOpsDeniedError(ShieldOpsError):
         reasons: list[str] | None = None,
         risk_score: float = 0.0,
         request_id: str = "",
+        task: str | None = None,
+        drift: bool = False,
     ) -> None:
         self.tool_name = tool_name
         self.reasons = list(reasons) if reasons else []
         self.risk_score = risk_score
         self.request_id = request_id
+        self.task = task
+        self.drift = drift
         detail = f"Tool '{tool_name}' denied: {', '.join(self.reasons)}"
         super().__init__(detail, status_code=403)
 
@@ -112,10 +121,13 @@ class ShieldOpsDeniedError(ShieldOpsError):
         The returned dict contains plain Python primitives (str, float,
         list[str]); ``json.dumps`` round-trips it without a custom encoder.
 
-        ``request_id`` is included only when set (i.e. when the exception
-        originated inside ``interceptor.check`` / ``async_check``), so
-        callers that construct the exception directly keep the historical
-        4-field shape.
+        Optional fields are only included when meaningful, so callers that
+        construct the exception directly keep the historical 4-field shape:
+
+        - ``request_id``: present when the exception originated inside
+          ``interceptor.check`` / ``async_check``.
+        - ``task`` + ``drift``: present only when the deny was triggered by
+          goal-drift inside an ``interceptor.task()`` scope.
         """
         payload: dict[str, object] = {
             "tool_name": self.tool_name,
@@ -125,6 +137,10 @@ class ShieldOpsDeniedError(ShieldOpsError):
         }
         if self.request_id:
             payload["request_id"] = self.request_id
+        if self.task is not None:
+            payload["task"] = self.task
+        if self.drift:
+            payload["drift"] = True
         return payload
 
 
