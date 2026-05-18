@@ -195,7 +195,7 @@ jobs:
   # 0.1.9: migrated from slsa-framework/slsa-github-generator (whose
   # internal `final` reporter cosmetic-failed on v2.0.0 + v2.1.0 even
   # when provenance generation succeeded — locked rule #666 in project
-  # memory). actions/attest-build-provenance@v2 is GitHub-native,
+  # memory). actions/attest-build-provenance@v4 is GitHub-native,
   # produces an in-toto SLSA v1 attestation signed via Sigstore + the
   # workflow's GitHub OIDC identity, and stores the attestation in
   # GitHub's central attestation API. Verification model for users:
@@ -229,7 +229,7 @@ jobs:
           name: dist
           path: dist/
       - name: Attest build provenance for sdist + wheel
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
             dist/*.tar.gz
